@@ -50,7 +50,6 @@ const School = {
     return `<div class="card hero-scan">
         <div class="grow"><b style="font-size:18px">Today’s papers</b><div class="sub">${scannedToday ? `${scannedToday} scanned today` : 'Snap each paper you got today. Due dates and study material come out of it.'}</div></div>
         <button class="btn primary" data-a="scan">📸 Scan</button></div>
-      ${!S.settings.ai.on || !S.settings.ai.key ? `<p class="faint">Study AI is off — you can still scan and make your own flashcards. A grown-up can turn it on in the Grown-up zone.</p>` : ''}
       ${Object.keys(byDay).sort().reverse().map(d => `<h2>${d === today() ? 'Today' : dueLabel(d)} <span class="faint">${new Date(d + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></h2>
         ${byDay[d].map(p => `<button class="arow" data-a="openPaper" data-id="${p.id}" style="--sc:${subj(p.subject).color}">
           <span class="thumb" data-thumb="${p.imageIds[0] || ''}"></span>
@@ -187,7 +186,7 @@ const School = {
   },
 
   paperSheet(p, fresh = false) {
-    const aiOn = S.settings.ai.on && S.settings.ai.key;
+    const aiOn = aiStatus().ready;
     const st = p.study;
     const draw = () => UI.sheet(`<div class="grab"></div>
       <div class="row"><h3 class="grow" style="margin:0">${fresh && !p.title ? 'Paper saved' : esc(p.title || 'Paper')}</h3><span class="pill">${p.imageIds.length} page${p.imageIds.length === 1 ? '' : 's'}</span></div>
@@ -198,7 +197,7 @@ const School = {
       ${p.status === 'error' ? `<div class="card soft" style="margin-top:14px"><b>Couldn’t build it</b><div class="faint">${esc(p.error || '')}</div></div>` : ''}
       ${st ? this.packHTML(p) : ''}
       <div class="spacer"></div>
-      ${p.status !== 'processing' ? (aiOn ? `<button class="btn primary big" data-x="build">${st ? '↻ Rebuild study pack' : '✨ Build study pack'}</button>` : `<button class="btn primary big" data-x="manual">✍️ Make flashcards</button><p class="faint center">Study AI is off. A grown-up can turn it on in the Grown-up zone.</p>`) : ''}
+      ${p.status !== 'processing' ? (aiOn ? `<button class="btn primary big" data-x="build">${st ? '↻ Rebuild study pack' : '✨ Build study pack'}</button><button class="btn ghost block" data-x="manual" style="margin-top:8px">✍️ Add my own flashcards</button>` : `<button class="btn primary big" data-x="manual">✍️ Make flashcards</button>`) : ''}
       <div class="btn-row"><button class="btn" data-x="assign">📌 Add due date</button><button class="btn" data-x="save">Save</button></div>
       <div class="btn-row"><button class="btn ghost" data-x="delete">Delete paper</button></div>`, root => {
       this.loadThumbs(root);
@@ -236,10 +235,11 @@ const School = {
 
   /* ================================================================ Study AI (Claude, via the parent's API key) */
   async build(p) {
-    const ai = S.settings.ai; if (!ai.key) return;
+    const ai = S.settings.ai; const stt = aiStatus();
+    if (!stt.ready) { p.status = 'error'; p.error = stt.code === 'limit' ? 'This month’s Study AI limit is used up. A grown-up can raise it.' : 'Study AI isn’t turned on.'; save({ noSchedule: true }); return; }
     p.status = 'processing'; p.error = ''; save({ noSchedule: true });
     try {
-      const images = []; for (const id of p.imageIds.slice(0, 6)) { const d = await IDB.get(id); if (d) images.push(d); }
+      const images = []; for (const id of p.imageIds.slice(0, Math.max(1, ai.maxPages || 6))) { const d = await IDB.get(id); if (d) images.push(d); }
       const g = S.player.grade;
       const teksText = ['math', 'science', 'ela', 'social'].map(k => `${k.toUpperCase()}:\n` + teksFor(g, k).map(([c, d]) => `  ${c} — ${d}`).join('\n')).join('\n');
       const now = new Date();
@@ -267,10 +267,10 @@ Return ONLY JSON:
  "teks": [{"code": str, "why": str}], "study_steps": [str], "parent_note": str|null}`;
       const content = images.map(d => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: d.split(',')[1] } }));
       content.push({ type: 'text', text: prompt });
-      const res = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-api-key': ai.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-        body: JSON.stringify({ model: ai.model || 'claude-sonnet-5-5', max_tokens: 4000, messages: [{ role: 'user', content }] }),
+      aiUsage().builds++; save({ noSchedule: true });
+      const res = await fetch(ai.endpoint || APP_CONFIG.ai.endpoint, {
+        method: 'POST', headers: aiHeaders(),
+        body: JSON.stringify({ model: ai.model || APP_CONFIG.ai.model, max_tokens: 4000, messages: [{ role: 'user', content }] }),
       });
       if (!res.ok) {
         const msg = res.status === 401 ? 'The API key was rejected — a grown-up needs to check it.' : res.status === 429 ? 'Too many requests right now. Try again in a minute.' : res.status === 400 ? 'The request was refused (photo may be too large or the model name is wrong).' : `Server said ${res.status}.`;

@@ -20,12 +20,30 @@ An Android app for a 10–15 year old with ADHD. It tracks missions (to-dos), sc
   - **Gone:** the cute pet, baby talk, and anything that punishes missed days.
 - **TEKS index:** 224 current Texas standards (grades 5–8: math 2012, science 2021, ELA 2017, social studies 2022) are bundled in `www/teks.js` and used to tag study material.
 
-## Turning on Study AI (for paper scanning)
-1. Create an API key at **console.anthropic.com** → API keys (add a few dollars of credit).
-2. On his phone: Profile → Grown-up zone → **Study AI**. Paste the key, tap **Test connection**, then **Save key**.
-3. Pick **Sonnet 5.5** (best reading of handwriting and diagrams) or **Haiku 5.5** (cheaper). A paper typically costs a few cents.
+## Study AI connection (ships OFF)
+Study AI is a switch you control. It ships **off**: no network calls, and no mention of AI anywhere in his app. He can still scan papers, make his own flashcards, and tag TEKS by hand.
 
-Photos are sent to Anthropic only when he taps "Build study pack." The key is stored only on that phone. Without a key he can still scan papers, make his own flashcards, and tag TEKS by hand.
+**To deploy it later** (Profile → Grown-up zone → Study AI connection):
+1. **API key:** create one at console.anthropic.com → API keys (add a few dollars of credit). Paste it and tap **Test connection**. The result and time are shown.
+2. **Model:** choose Sonnet 5.5 (best with handwriting and diagrams) or Haiku 5.5 (cheaper). **Custom** takes any future model ID.
+3. **Limits:** max pages per paper (default 6) and a monthly cap on study packs (default 100; 0 = none). A usage counter has a reset button.
+4. **Advanced:** endpoint URL and API version. Point the endpoint at your own proxy later if you'd rather keep the key off the phone. **Restore build defaults** resets these (the key is kept).
+5. Flip **Connection on**. Status reads *On — ready*, with a LIVE badge.
+
+Turn it off any time; every setting is kept. To change what a *fresh install* starts with (on/off, model, limits, endpoint), edit `www/config.js` before building.
+
+Photos go to the endpoint only when he taps "Build study pack": the paper's pages, his grade, and that grade's TEKS list. No name or account is sent.
+
+## Planning ahead (rolling 7 days)
+**Plan ahead** (Home) opens a 7-day strip starting today. Tap a day or use ‹ › to cycle through. For any day you can:
+- see what's fixed (events, tests and due items, routines);
+- add missions by typing ("read at 7pm");
+- add a due date or test, a study block, or an event; the planner reopens when you save;
+- give a mission a when-then time (tap its time chip: After school → After snack → After dinner → Before bed);
+- move a mission a day earlier or later, or park it in Later;
+- pull parked items into that day.
+
+More than 3 missions on a day gets a gentle "heavy day" note. Reminders are now scheduled 8 days ahead, so planned days fire even if the app isn't opened.
 
 ---
 

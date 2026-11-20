@@ -46,7 +46,8 @@ function freshState() {
     settings: { bedtime: '21:00', schoolQuiet: true, schoolStart: '07:55', schoolEnd: '15:10', checkins: 'gentle',
       sound: true, haptics: true, calm: false, light: false, bigtext: false, dyslexic: false, weekGoal: 4, pin: '',
       anchors: { afterschool: '15:45', aftersnack: '16:15', afterdinner: '18:45' },
-      ai: { key: '', model: 'claude-sonnet-5-5', on: false }, parentSeen: 0 },
+      ai: { on: !!APP_CONFIG.ai.enabled, key: '', model: APP_CONFIG.ai.model, endpoint: APP_CONFIG.ai.endpoint, apiVersion: APP_CONFIG.ai.apiVersion,
+        maxPages: APP_CONFIG.ai.maxPages, monthlyLimit: APP_CONFIG.ai.monthlyLimit, usage: { month: '', builds: 0 }, lastTest: null }, parentSeen: 0 },
     focus: null, fired: {},
   };
 }
@@ -407,6 +408,35 @@ function openAssignments() { return S.assignments.filter(a => a.status !== 'done
 function daysUntil(dk) { return Math.round((new Date(dk + 'T12:00:00') - new Date(today() + 'T12:00:00')) / 864e5); }
 function dueLabel(dk) { const n = daysUntil(dk); return n < 0 ? `${-n} day${n === -1 ? '' : 's'} ago` : n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n < 7 ? new Date(dk + 'T12:00').toLocaleDateString(undefined, { weekday: 'long' }) : new Date(dk + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
 function dueLc(dk) { const l = dueLabel(dk); return l === 'Today' || l === 'Tomorrow' ? l.toLowerCase() : l; }
+/* Study AI is only "ready" when a grown-up switched it on, a key is set, and the monthly limit isn't hit. */
+function aiUsage() { const ai = S.settings.ai; const m = today().slice(0, 7); if (!ai.usage || ai.usage.month !== m) ai.usage = { month: m, builds: 0 }; return ai.usage; }
+function aiStatus() {
+  const ai = S.settings.ai;
+  if (!ai.on) return { ready: false, code: 'off', label: 'Off' };
+  if (!ai.key && /anthropic\.com/.test(ai.endpoint || '')) return { ready: false, code: 'nokey', label: 'On — needs an API key' };
+  if (ai.monthlyLimit && aiUsage().builds >= ai.monthlyLimit) return { ready: false, code: 'limit', label: 'On — monthly limit reached' };
+  return { ready: true, code: 'ready', label: 'On — ready' };
+}
+function aiHeaders() {
+  const ai = S.settings.ai; const h = { 'content-type': 'application/json', 'anthropic-version': ai.apiVersion || '2023-06-01' };
+  if (ai.key) h['x-api-key'] = ai.key;
+  if (/api\.anthropic\.com/.test(ai.endpoint || '')) h['anthropic-dangerous-direct-browser-access'] = 'true';
+  return h;
+}
+/* Tiny natural-language parse: "math at 4pm", "science project tomorrow", "read later" */
+function parseQuick(text) {
+  const extra = {};
+  if (/\btomorrow\b/i.test(text)) { extra.when = 'tomorrow'; text = text.replace(/\btomorrow\b/i, ''); }
+  if (/\b(later|someday)\b/i.test(text)) { extra.when = 'later'; text = text.replace(/\b(later|someday)\b/i, ''); }
+  const m = text.match(/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i) || text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\b/i);
+  if (m) {
+    let h = +m[1]; const mi = +(m[2] || 0); const ap = (m[3] || '').toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0; if (!ap && h < 8) h += 12;
+    if (h < 24 && mi < 60) { extra.time = `${pad(h)}:${pad(mi)}`; text = text.replace(m[0], ''); }
+  }
+  text = text.replace(/\s+/g, ' ').replace(/\s+(at|on)\s*$/i, '').trim() || 'Mission';
+  return { title: text.charAt(0).toUpperCase() + text.slice(1), extra };
+}
 function itemsOn(dk) {
   return {
     events: S.events.filter(e => e.date === dk).sort((a, b) => (a.time || '99') < (b.time || '99') ? -1 : 1),
@@ -447,7 +477,7 @@ const Reminders = {
   ready: false,
   plan(now = new Date()) {
     const voice = S.profile.style.voice; const out = [];
-    const horizon = new Date(+now + 72 * 3600e3);
+    const horizon = new Date(+now + 8 * 864e5);
     const push = (o) => { if (o.at > now && o.at < horizon && !inNightQuiet(o.at) && !(o.kind === 'event' && inSchoolQuiet(o.at))) out.push(o); };
     // Missions with a time: heads-up (−5), at time, gentle follow-up (+10). Varied wording each time.
     S.tasks.forEach(t => {
@@ -460,7 +490,7 @@ const Reminders = {
       if (!t.auto) push({ key: `f-${t.id}-${+at}`, at: new Date(+at + 10 * 60e3), title: `${t.emoji} Still waiting`, body: voiceLine(voice, 'follow', t.title), kind: 'mission', taskId: t.id, channel: 'missions' });
     });
     // Routines on their days.
-    for (let dOff = 0; dOff <= 1; dOff++) {
+    for (let dOff = 0; dOff <= 7; dOff++) {
       const base = addDays(now, dOff); const wd = base.getDay(); const dk = dayKey(base);
       S.routines.forEach(r => {
         if (!r.remind || !r.days.includes(wd)) return;
@@ -486,7 +516,7 @@ const Reminders = {
       push({ key: `ev-${e.id}`, at: new Date(+at - 30 * 60e3), title: `${e.title} in 30 min`, body: e.where ? `At ${e.where}. Time to get ready.` : 'Time to get ready.', kind: 'event', channel: 'routines' });
     });
     out.sort((a, b) => a.at - b.at);
-    return out.slice(0, 60);
+    return out.slice(0, 150);
   },
   idFor(key) { let h = 0; for (const c of key) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 2000000000 + 1; },
 

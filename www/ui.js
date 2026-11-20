@@ -256,7 +256,7 @@ const UI = {
     w.onclick = e => { if (e.target === w) this.closeSheet(); };
     bind && bind(s);
     const first = s.querySelector('input:not([type=time]):not([type=date])'); if (first && first.dataset.autofocus) first.focus();
-  },  closeSheet() { $('#sheet-wrap').hidden = true; $('#sheet').innerHTML = ''; },  toast(msg, action, fn, ms = 2600) {
+  },  closeSheet() { $('#sheet-wrap').hidden = true; $('#sheet').innerHTML = ''; const r = this._ret; if (r) { this._ret = null; setTimeout(r, 0); } },  toast(msg, action, fn, ms = 2600) {
     const el = $('#toast'); el.innerHTML = esc(msg) + (action ? ` <button>${esc(action)}</button>` : ''); el.hidden = false;
     if (action) el.querySelector('button').onclick = () => { el.hidden = true; fn(); };
     clearTimeout(this._tt); this._tt = setTimeout(() => { el.hidden = true; }, action ? 6000 : ms);
@@ -380,53 +380,81 @@ const UI = {
     draw();
   },  saveTask(t) { if (!S.tasks.includes(t)) S.tasks.push(t); save(); },
 
-  /* ---------- Plan my day: pick ≤3, give each a When → Then */  planSheet() {
-    const all = S.tasks.filter(t => !t.done);
-    const chosen = new Set(todayQueue().slice(0, 3).map(t => t.id));
-    const draw = () => this.sheet(`<div class="grab"></div><h3>🗺️ Plan my day</h3>
-      <p class="sub">Pick up to <b>3 missions</b> for today. Everything else waits in Later — that’s fine!</p>
-      ${S.profile.style.peak !== 'unsure' ? `<p class="faint">Your power time: ${{ morning: 'morning 🌅', afterschool: 'right after school 🏫', evening: 'evening 🌙' }[S.profile.style.peak]} — put the big one there.</p>` : ''}
-      ${all.length ? all.map(t => `<div class="task plan-row" data-x="pick" data-id="${t.id}"><span class="check ${chosen.has(t.id) ? 'on' : ''}">${chosen.has(t.id) ? '✓' : ''}</span><span class="em">${esc(t.emoji)}</span><div class="grow"><div class="t">${esc(t.title)}</div>
-        ${chosen.has(t.id) ? `<div class="anchor-grid">${[['afterschool', '🏫 After school'], ['aftersnack', '🍎 After snack'], ['afterdinner', '🍽️ After dinner'], ['beforebed', '🌙 Before bed']].map(([k, l]) => `<button class="chip ${t.anchor === k ? 'on' : ''}" data-x="anchor" data-id="${t.id}" data-k="${k}">${l}</button>`).join('')}</div>` : ''}</div></div>`).join('')
-        : `<div class="card soft center sub">No missions yet — add some on the Missions tab first.</div>`}
-      <div class="spacer"></div><button class="btn primary block" data-x="done">Lock in my plan</button>`, root => {
+  /* ---------- Rolling 7-day planner: plan any of the next 7 days without opening the calendar */
+  planSheet(dk = null) {
+    const N = APP_CONFIG.planDays || 7;
+    const days = Array.from({ length: N }, (_, i) => dayKey(addDays(new Date(), i)));
+    if (!dk || !days.includes(dk)) dk = this._planDay && days.includes(this._planDay) ? this._planDay : days[0];
+    this._planDay = dk;
+    const idx = days.indexOf(dk);
+    const d = new Date(dk + 'T12:00');
+    const wd = d.getDay();
+    const it = itemsOn(dk);
+    const planned = S.tasks.filter(t => !t.done && t.date === dk && t.when !== 'later').sort((a, b) => (a.time || '99') < (b.time || '99') ? -1 : 1);
+    const pullable = S.tasks.filter(t => !t.done && (t.when === 'later' || (t.date && t.date < today())) && !t.assignmentId);
+    const routines = S.routines.filter(r => r.days.includes(wd));
+    const anchors = ['', 'afterschool', 'aftersnack', 'afterdinner', 'beforebed'];
+    const short = { '': 'Any time', afterschool: 'After school', aftersnack: 'After snack', afterdinner: 'After dinner', beforebed: 'Before bed' };
+    const load = k => S.tasks.filter(t => !t.done && t.date === k && t.when !== 'later').length + S.assignments.filter(a => a.due === k && a.status !== 'done').length + S.events.filter(e => e.date === k).length;
+    const dayName = dk === today() ? 'Today' : idx === 1 ? 'Tomorrow' : d.toLocaleDateString(undefined, { weekday: 'long' });
+    this.sheet(`<div class="grab"></div>
+      <div class="row" style="justify-content:space-between"><h3 style="margin:0">Plan ahead</h3><span class="faint">next ${N} days</span></div>
+      <div class="plan-strip">${days.map((k, i) => { const dd = new Date(k + 'T12:00'); const n = load(k);
+        return `<button class="pday ${k === dk ? 'on' : ''}" data-x="day" data-k="${k}"><small>${i === 0 ? 'Today' : dd.toLocaleDateString(undefined, { weekday: 'short' })}</small><b>${dd.getDate()}</b><span class="pdots">${Array.from({ length: Math.min(n, 4) }, () => '<i></i>').join('')}</span></button>`; }).join('')}</div>
+      <div class="plan-nav"><button class="iconbtn" data-x="prev" aria-label="Previous day">‹</button>
+        <div class="grow center"><div class="plan-day">${esc(dayName)}</div><div class="faint">${d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</div></div>
+        <button class="iconbtn" data-x="next" aria-label="Next day">›</button></div>
+
+      ${it.events.length || it.due.length || routines.length ? `<div class="card soft plan-fixed">
+        ${it.events.map(e => `<div class="pf"><span class="pf-t">${e.time ? fmtHM(e.time) : 'All day'}</span>${esc(e.title)}</div>`).join('')}
+        ${it.due.map(a => `<div class="pf"><span class="pf-t" style="color:${subj(a.subject).color}">${a.type === 'test' || a.type === 'quiz' ? atype(a.type).name : 'Due'}</span>${esc(a.title)}${a.status === 'done' ? ' ✓' : ''}</div>`).join('')}
+        ${routines.length ? `<div class="pf faint"><span class="pf-t">Routines</span>${routines.map(r => esc(r.name)).join(' · ')}</div>` : ''}
+      </div>` : ''}
+
+      <label class="lbl">Missions for ${esc(dayName.toLowerCase() === 'today' ? 'today' : dayName)} · ${planned.length}${planned.length > 3 ? ' <span class="faint">— heavy day; consider moving one</span>' : ''}</label>
+      ${planned.length ? planned.map(t => `<div class="task plan-task">
+        <span class="em">${esc(t.emoji)}</span>
+        <div class="grow"><div class="t" style="font-size:16px">${esc(t.title)}</div>
+          <button class="chip anchor-chip" data-x="anchor" data-id="${t.id}">${t.time && !t.anchor ? fmtHM(t.time) : esc(short[t.anchor || ''])}</button></div>
+        <button class="iconbtn sm" data-x="mv" data-id="${t.id}" data-k="-1" ${idx === 0 ? 'disabled' : ''} aria-label="Move earlier">‹</button>
+        <button class="iconbtn sm" data-x="mv" data-id="${t.id}" data-k="1" aria-label="Move later">›</button>
+        <button class="iconbtn sm" data-x="park" data-id="${t.id}" aria-label="Move to Later">✕</button></div>`).join('')
+        : `<div class="card soft center sub" style="margin-bottom:8px">Nothing planned yet.</div>`}
+
+      <div class="quickadd" style="margin-top:6px"><input id="pl-add" placeholder="Add to ${esc(dayName === 'Today' ? 'today' : dayName)} — e.g. “read at 7pm”" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-x="add" aria-label="Add">＋</button></div>
+      <div class="add-grid three"><button class="btn small" data-x="due">📌 Due / test</button><button class="btn small" data-x="study">📚 Study block</button><button class="btn small" data-x="event">📅 Event</button></div>
+
+      ${pullable.length ? `<label class="lbl">Pull in from Later</label>${pullable.slice(0, 8).map(t => `<button class="list-btn" data-x="pull" data-id="${t.id}"><span class="em">${esc(t.emoji)}</span><span class="grow">${esc(t.title)}</span><span class="faint">＋ ${esc(dayName === 'Today' ? 'today' : dayName.slice(0, 3))}</span></button>`).join('')}` : ''}
+      <div class="spacer"></div><button class="btn primary block" data-x="done">Done</button>`, root => {
+      const input = $('#pl-add', root);
+      const addTyped = () => { const v = input.value.trim(); if (!v) return; const { title, extra } = parseQuick(v); delete extra.when; const t = newTask(title, { ...extra, date: dk }); S.tasks.push(t); save(); Sfx.play('coin'); this.planSheet(dk); setTimeout(() => { const i = $('#pl-add'); i && i.focus(); }, 30); };
+      input.onkeydown = e => { if (e.key === 'Enter') addTyped(); };
       root.onclick = e => {
-        const b = e.target.closest('[data-x]'); if (!b) return;
-        const t = S.tasks.find(x => x.id === b.dataset.id);
-        if (b.dataset.x === 'anchor') { e.stopPropagation(); t.anchor = t.anchor === b.dataset.k ? '' : b.dataset.k; if (t.anchor) t.time = S.settings.anchors[t.anchor] || fmt24(new Date(+atTime(S.settings.bedtime) - 75 * 60e3)); else t.time = ''; return draw(); }
-        if (b.dataset.x === 'pick') {
-          if (chosen.has(t.id)) chosen.delete(t.id); else { if (chosen.size >= 3) { this.toast('3 is the max — finish those first!'); return; } chosen.add(t.id); }
-          Sfx.play('tap'); return draw();
-        }
-        if (b.dataset.x === 'done') {
-          all.forEach(t => {
-            if (chosen.has(t.id)) { t.when = 'today'; t.date = today(); t.parkedAuto = false; }
-            else if (isToday(t)) { t.when = 'later'; t.date = null; t.time = ''; }
-          });
-          save(); this.closeSheet(); this.go('home'); this.toast('Plan locked. One at a time.');
-        }
+        const b = e.target.closest('[data-x]'); if (!b) return; const x = b.dataset.x; const t = b.dataset.id && S.tasks.find(y => y.id === b.dataset.id);
+        if (x === 'day') { Sfx.play('tap'); return this.planSheet(b.dataset.k); }
+        if (x === 'prev' || x === 'next') { const n = (idx + (x === 'next' ? 1 : -1) + N) % N; Sfx.play('tap'); return this.planSheet(days[n]); }
+        if (x === 'add') return addTyped();
+        if (x === 'anchor') { const i = anchors.indexOf(t.anchor || ''); const nx = anchors[(i + 1) % anchors.length]; t.anchor = nx; t.time = nx ? anchorTime(nx) : ''; save(); return this.planSheet(dk); }
+        if (x === 'mv') { const ni = idx + +b.dataset.k; t.date = dayKey(addDays(new Date(dk + 'T12:00'), +b.dataset.k)); t.when = 'today'; save(); this.toast(`Moved to ${ni === 0 ? 'today' : ni === 1 ? 'tomorrow' : new Date(t.date + 'T12:00').toLocaleDateString(undefined, { weekday: 'long' })}`); return this.planSheet(dk); }
+        if (x === 'park') { t.when = 'later'; t.date = null; t.time = ''; t.anchor = ''; save(); this.toast('Moved to Later'); return this.planSheet(dk); }
+        if (x === 'pull') { t.when = 'today'; t.date = dk; t.parkedAuto = false; save(); Sfx.play('coin'); return this.planSheet(dk); }
+        if (x === 'due') { this._ret = () => this.planSheet(dk); return School.assignmentSheet(null, { due: dk === today() ? dayKey(addDays(new Date(), 1)) : dk }); }
+        if (x === 'study') { this._ret = () => this.planSheet(dk); return Cal.studySheet(dk); }
+        if (x === 'event') { this._ret = () => this.planSheet(dk); return Cal.eventSheet(null, dk); }
+        if (x === 'done') { track('plan'); this._planDay = null; this.closeSheet(); this.render(); this.toast('Plan locked. One at a time.'); }
       };
     });
-    draw();
   },
 
   /* ---------- Quick add with tiny natural-language parsing */  quickAdd(text) {
     text = (text || '').trim(); if (!text) return;
-    const extra = {};
-    if (/\btomorrow\b/i.test(text)) { extra.when = 'tomorrow'; text = text.replace(/\btomorrow\b/i, ''); }
-    if (/\b(later|someday)\b/i.test(text)) { extra.when = 'later'; text = text.replace(/\b(later|someday)\b/i, ''); }
-    const m = text.match(/\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i) || text.match(/\bat\s+(\d{1,2})(?::(\d{2}))?\b/i);
-    if (m) {
-      let h = +m[1]; const mi = +(m[2] || 0); const ap = (m[3] || '').toLowerCase();
-      if (ap === 'pm' && h < 12) h += 12; if (ap === 'am' && h === 12) h = 0; if (!ap && h < 8) h += 12;
-      if (h < 24 && mi < 60) { extra.time = `${pad(h)}:${pad(mi)}`; text = text.replace(m[0], ''); }
-    }
-    text = text.replace(/\s+/g, ' ').replace(/\s+(at|on)\s*$/i, '').trim() || 'Mission';
-    const t = newTask(text.charAt(0).toUpperCase() + text.slice(1), extra);
+    const { title, extra } = parseQuick(text);
+    const t = newTask(title, extra);
     S.tasks.push(t); save(); Sfx.play('coin'); buzz();
     this.render();
-    this.toast(`Added ${t.emoji} ${t.title}${t.time ? ' · ⏰ ' + fmtHM(t.time) : ''}`, 'Details', () => this.taskSheet(t));
+    this.toast(`Added ${t.title}${t.date && t.date !== today() ? ' · ' + dueLabel(t.date) : ''}${t.time ? ' · ' + fmtHM(t.time) : ''}`, 'Details', () => this.taskSheet(t));
   },
+
   mic() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
     const rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
@@ -554,12 +582,33 @@ const UI = {
       <h2>🎓 School</h2>
       <label class="lbl">Grade (used for TEKS alignment)</label>
       <div class="chips">${[5, 6, 7, 8, 9].map(g => `<button class="chip ${S.player.grade === g ? 'on' : ''}" data-x="grade" data-k="${g}">${g}th</button>`).join('')}</div>
-      <h2>✨ Study AI (reads scanned papers)</h2>
-      <div class="card soft sub">Turns photos of school papers into a summary, TEKS tags, flashcards and a practice quiz, using Claude through your own Anthropic API key (console.anthropic.com → API keys). Photos are sent to Anthropic only when he taps “Build study pack.” Typical cost: a few cents per paper. It is told never to answer the actual homework — it teaches the ideas and writes similar practice.</div>
-      <div class="list-btn" data-x="aion">Study AI enabled<span class="switch ${S.settings.ai.on ? 'on' : ''}" style="margin-left:auto"></span></div>
-      <input class="field" id="pz-key" type="password" value="${esc(S.settings.ai.key)}" placeholder="sk-ant-…" autocomplete="off">
-      <div class="chips" style="margin-top:8px">${[['claude-sonnet-5-5', 'Sonnet 5.5 (best)'], ['claude-haiku-5-5', 'Haiku 5.5 (cheaper)']].map(([m, l]) => `<button class="chip ${S.settings.ai.model === m ? 'on' : ''}" data-x="aimodel" data-k="${m}">${l}</button>`).join('')}</div>
-      <div class="btn-row"><button class="btn small" data-x="aisave">Save key</button><button class="btn small" data-x="aitest">Test connection</button></div>
+      <h2>✨ Study AI connection</h2>
+      ${(() => { const ai = st.ai; const stt = aiStatus(); const u = aiUsage(); const custom = !APP_CONFIG.ai.models.some(([m]) => m === ai.model);
+        return `<div class="card ai-card">
+        <div class="row"><div class="grow"><b>Status</b><div class="faint">${esc(stt.label)}</div></div><span class="pill ${stt.ready ? 'gold' : ''}">${stt.ready ? 'LIVE' : ai.on ? 'ON' : 'OFF'}</span></div>
+        <div class="list-btn" data-x="aion" style="margin-top:10px">Connection ${ai.on ? 'on' : 'off'}<span class="switch ${ai.on ? 'on' : ''}" style="margin-left:auto"></span></div>
+        <p class="faint" style="margin:2px 2px 0">Off = no network calls and no AI anywhere in his app. He can still scan papers and make his own flashcards. Settings below are kept while it's off.</p>
+        <label class="lbl">API key <span class="faint">(console.anthropic.com → API keys)</span></label>
+        <div class="row"><input class="field grow" id="ai-key" type="password" value="${esc(ai.key)}" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><button class="btn small" data-x="aishow">Show</button></div>
+        <label class="lbl">Model</label>
+        <div class="chips">${APP_CONFIG.ai.models.map(([m, l]) => `<button class="chip ${ai.model === m ? 'on' : ''}" data-x="aimodel" data-k="${m}">${esc(l)}</button>`).join('')}<button class="chip ${custom ? 'on' : ''}" data-x="aimodel" data-k="__custom">Custom</button></div>
+        <input class="field" id="ai-model" value="${esc(ai.model)}" placeholder="model ID, e.g. claude-sonnet-5-5" style="margin-top:8px;${custom ? '' : 'display:none'}" spellcheck="false">
+        <div class="grid2" style="margin-top:12px">
+          <div><div class="faint">Max pages per paper</div><input class="field" id="ai-pages" type="number" min="1" max="10" value="${ai.maxPages || 6}"></div>
+          <div><div class="faint">Monthly limit (0 = none)</div><input class="field" id="ai-limit" type="number" min="0" value="${ai.monthlyLimit ?? 100}"></div>
+        </div>
+        <div class="faint" style="margin-top:8px">Used this month: <b>${u.builds}</b>${ai.monthlyLimit ? ` of ${ai.monthlyLimit}` : ''} study packs · <button class="linkish" data-x="aireset">reset</button></div>
+        <details class="fold"><summary>Advanced</summary>
+          <div class="faint">Endpoint URL (point at your own proxy later to keep the key off the phone)</div>
+          <input class="field" id="ai-endpoint" value="${esc(ai.endpoint || APP_CONFIG.ai.endpoint)}" spellcheck="false">
+          <div class="faint" style="margin-top:8px">API version header</div>
+          <input class="field" id="ai-ver" value="${esc(ai.apiVersion || APP_CONFIG.ai.apiVersion)}" spellcheck="false">
+          <button class="btn small ghost" data-x="aidefaults" style="margin-top:8px">Restore build defaults</button>
+        </details>
+        <div class="btn-row"><button class="btn small primary" data-x="aisave">Save AI settings</button><button class="btn small" data-x="aitest">Test connection</button></div>
+        ${ai.lastTest ? `<div class="faint" style="margin-top:8px">Last test: ${ai.lastTest.ok ? '✓ connected' : '✕ ' + esc(ai.lastTest.msg)} · ${new Date(ai.lastTest.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>` : ''}
+        <details class="fold"><summary>What gets sent</summary><p class="sub" style="margin:0">Only the photos of a paper, his grade, and the TEKS list for that grade — and only when he taps “Build study pack.” No name or account. Instructions tell the AI never to answer the actual homework; it teaches the ideas and writes similar practice. Typical cost is a few cents per paper. The key is stored only on this phone.</p></details>
+      </div>`; })()}
 
       <h2>⏰ Schedule</h2>
       <label class="lbl">Bedtime</label><input class="field" type="time" id="pz-bed" value="${st.bedtime}">
@@ -583,6 +632,15 @@ const UI = {
       <input type="file" id="pz-file" accept="application/json" hidden>
       <div class="btn-row"><button class="btn small ghost" data-x="pin">Change PIN</button><button class="btn small ghost" data-x="reset">Reset everything</button></div>
       <div class="spacer"></div><button class="btn primary block" data-x="close">Done</button>`, root => {
+      const pullAI = () => {
+        const v = sel => { const el = $(sel, root); return el ? el.value.trim() : null; };
+        const key = v('#ai-key'); if (key !== null) st.ai.key = key;
+        const m = $('#ai-model', root); if (m && m.style.display !== 'none' && m.value.trim()) st.ai.model = m.value.trim();
+        const pg = +v('#ai-pages'); if (pg) st.ai.maxPages = clamp(pg, 1, 10);
+        const lim = v('#ai-limit'); if (lim !== null && lim !== '') st.ai.monthlyLimit = Math.max(0, +lim || 0);
+        const ep = v('#ai-endpoint'); if (ep) st.ai.endpoint = ep;
+        const ver = v('#ai-ver'); if (ver) st.ai.apiVersion = ver;
+      };
       root.onclick = async e => {
         const b = e.target.closest('[data-x]'); if (!b) return; const x = b.dataset.x, id = b.dataset.id;
         if (x === 'note') { const v = $('#pz-note', root).value.trim(); if (v) { S.notes.unshift({ id: uid(), text: v, from: 'Dad', at: Date.now(), read: false }); S.notes = S.notes.slice(0, 20); save({ noSchedule: true }); this.toast('Note sent 💌'); $('#pz-note', root).value = ''; } }
@@ -596,14 +654,23 @@ const UI = {
           S.rewardsUpdated = Date.now(); save({ noSchedule: true }); if (x === 'rsave') this.toast('Reward menu saved'); this.parentZone();
         }
         if (x === 'grade') { S.player.grade = +b.dataset.k; save({ noSchedule: true }); $$('[data-x=grade]', root).forEach(c => c.classList.toggle('on', c === b)); }
-        if (x === 'aion') { S.settings.ai.on = !S.settings.ai.on; b.querySelector('.switch').classList.toggle('on', S.settings.ai.on); save({ noSchedule: true }); }
-        if (x === 'aimodel') { S.settings.ai.model = b.dataset.k; $$('[data-x=aimodel]', root).forEach(c => c.classList.toggle('on', c === b)); save({ noSchedule: true }); }
-        if (x === 'aisave') { S.settings.ai.key = $('#pz-key', root).value.trim(); if (S.settings.ai.key) S.settings.ai.on = true; save({ noSchedule: true }); this.toast('Key saved on this phone'); this.parentZone(); }
+        if (x === 'aion') { pullAI(); st.ai.on = !st.ai.on; save({ noSchedule: true }); this.toast(st.ai.on ? 'Study AI connection on' : 'Study AI connection off'); return this.parentZone(); }
+        if (x === 'aishow') { const k = $('#ai-key', root); k.type = k.type === 'password' ? 'text' : 'password'; b.textContent = k.type === 'password' ? 'Show' : 'Hide'; }
+        if (x === 'aimodel') { pullAI(); if (b.dataset.k !== '__custom') st.ai.model = b.dataset.k; else { const m = $('#ai-model', root); m.style.display = ''; m.focus(); $$('[data-x=aimodel]', root).forEach(c => c.classList.toggle('on', c === b)); return; } save({ noSchedule: true }); return this.parentZone(); }
+        if (x === 'aireset') { aiUsage().builds = 0; save({ noSchedule: true }); return this.parentZone(); }
+        if (x === 'aidefaults') { Object.assign(st.ai, { endpoint: APP_CONFIG.ai.endpoint, apiVersion: APP_CONFIG.ai.apiVersion, model: APP_CONFIG.ai.model, maxPages: APP_CONFIG.ai.maxPages, monthlyLimit: APP_CONFIG.ai.monthlyLimit }); save({ noSchedule: true }); this.toast('Defaults restored (key kept)'); return this.parentZone(); }
+        if (x === 'aisave') { pullAI(); save({ noSchedule: true }); this.toast('AI settings saved'); return this.parentZone(); }
         if (x === 'aitest') {
-          const key = $('#pz-key', root).value.trim(); if (!key) return this.toast('Paste a key first');
+          pullAI(); save({ noSchedule: true });
+          if (!st.ai.key && /anthropic\.com/.test(st.ai.endpoint)) return this.toast('Paste a key first');
           this.toast('Testing…');
-          try { const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: S.settings.ai.model, max_tokens: 10, messages: [{ role: 'user', content: 'Reply OK' }] }) });
-            this.toast(r.ok ? 'Connected ✓' : r.status === 401 ? 'Key rejected (401)' : r.status === 404 ? 'Model not found — try the other model' : 'Error ' + r.status); } catch (err) { this.toast('No connection'); }
+          let ok = false, msg = '';
+          try { const r = await fetch(st.ai.endpoint, { method: 'POST', headers: aiHeaders(), body: JSON.stringify({ model: st.ai.model, max_tokens: 10, messages: [{ role: 'user', content: 'Reply OK' }] }) });
+            ok = r.ok; msg = r.ok ? 'connected' : r.status === 401 ? 'key rejected (401)' : r.status === 404 ? 'model or URL not found (404)' : r.status === 429 ? 'rate limited (429)' : 'error ' + r.status; }
+          catch (err) { msg = 'no connection'; }
+          st.ai.lastTest = { ok, msg, at: Date.now() }; save({ noSchedule: true });
+          this.toast(ok ? 'Connected ✓' + (st.ai.on ? '' : ' — switch the connection on when you’re ready') : 'Test failed: ' + msg);
+          return this.parentZone();
         }
         if (x === 'tschool') { st.schoolQuiet = !st.schoolQuiet; b.querySelector('.switch').classList.toggle('on', st.schoolQuiet); }
         if (x === 'goal') { st.weekGoal = +b.dataset.k; $$('[data-x=goal]', root).forEach(c => c.classList.toggle('on', c === b)); }
@@ -670,7 +737,7 @@ const UI = {
       main = `<div class="now-card now-empty"><div class="now-title" style="justify-content:center">All clear</div>
         <p class="sub">${esc(pick(LINES.hello))}</p>
         <div class="quickadd"><input id="qa-now" placeholder="Add a mission…" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-a="qaNow" aria-label="Add">＋</button></div>
-        <div class="btn-row"><button class="btn small" data-a="plan">Plan my day</button><button class="btn small" data-a="tab" data-t="calendar">Calendar</button></div></div>`;
+        <div class="btn-row"><button class="btn small" data-a="plan">Plan ahead</button><button class="btn small" data-a="tab" data-t="calendar">Calendar</button></div></div>`;
     }
     const rest = q.slice(r || S.focus ? 0 : 1, (r || S.focus ? 0 : 1) + 3);
     const note = S.notes.find(n => !n.read);
@@ -693,7 +760,7 @@ const UI = {
       <div class="row wrap" style="gap:8px;margin-top:6px">
         ${S.parking.length ? `<button class="btn small ghost" data-a="parking">🅿️ Parking lot · ${S.parking.length}</button>` : ''}
         ${later ? `<button class="btn small ghost" data-a="backlog">Later · ${later}</button>` : ''}
-        <button class="btn small ghost" data-a="plan">Plan my day</button>
+        <button class="btn small ghost" data-a="plan">Plan ahead</button>
       </div>`;
   },
 

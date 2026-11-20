@@ -285,3 +285,22 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .breathe { width: 130px; height: 130px; border-radius: 50%; background: color-mix(in srgb, var(--soft) 30%, transparent); border: 1px solid var(--soft); margin: 20px auto; animation: breathe 8s ease-in-out infinite; display: flex; align-items: center; justify-content: center; font-family: var(--display); color: var(--soft); }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 body.calm *, body.calm *::before, body.calm *::after { animation: none !important; transition: none !important; }
+.linkish { color: var(--accent); text-decoration: underline; padding: 0; min-height: 0; }
+.ai-card { border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.plan-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 5px; margin: 12px 0 8px; }
+.pday { background: var(--card); border: 1px solid var(--line2); border-radius: 12px; padding: 6px 2px; display: flex; flex-direction: column; align-items: center; gap: 1px; min-height: 64px; }
+.pday small { font-size: 11px; color: var(--faint); }
+.pday b { font-family: var(--display); font-size: 18px; }
+.pday.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--card)); }
+.pdots { display: flex; gap: 2px; min-height: 5px; }
+.pdots i { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); display: block; }
+.plan-nav { display: flex; align-items: center; gap: 10px; margin: 6px 0 10px; }
+.plan-day { font-family: var(--display); font-size: 21px; font-weight: 700; }
+.plan-fixed { padding: 10px 14px; }
+.pf { display: flex; gap: 10px; padding: 4px 0; font-size: 15px; }
+.pf-t { min-width: 74px; color: var(--muted); font-size: 13px; padding-top: 2px; }
+.plan-task { align-items: flex-start; }
+.anchor-chip { min-height: 30px; font-size: 12.5px; padding: 0 10px; margin-top: 6px; }
+.iconbtn.sm { width: 38px; height: 38px; font-size: 18px; border-radius: 10px; }
+.iconbtn[disabled] { opacity: .3; }
+.add-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }

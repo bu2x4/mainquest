@@ -1,6 +1,6 @@
 /* MainQuest service worker: offline app shell + notification actions. */
-const CACHE = 'mainquest-v2';
-const SHELL = ['./', 'index.html', 'app.css', 'teks.js', 'content.js', 'core.js', 'focus.js', 'school.js', 'calendar.js', 'ui.js', 'app.js', 'manifest.webmanifest',
+const CACHE = 'mainquest-v3';
+const SHELL = ['./', 'index.html', 'app.css', 'config.js', 'teks.js', 'content.js', 'core.js', 'focus.js', 'school.js', 'calendar.js', 'ui.js', 'app.js', 'manifest.webmanifest',
   'fonts/chakra-petch-latin-600-normal.woff2', 'fonts/chakra-petch-latin-700-normal.woff2', 'fonts/lexend-latin-400-normal.woff2', 'fonts/lexend-latin-500-normal.woff2', 'fonts/lexend-latin-700-normal.woff2',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/badge-96.png'];
 
