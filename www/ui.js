@@ -680,7 +680,8 @@ const UI = {
     return `
       ${main}
       ${rest.length ? `<div class="list-head"><span>Up next</span>${q.length > rest.length + 1 ? `<span class="faint">+${q.length - rest.length - 1} more</span>` : ''}</div>${rest.map(t => `<div class="task" data-a="openTask" data-id="${t.id}"><span class="em">${esc(t.emoji)}</span><div class="grow"><div class="t">${esc(t.title)}</div>${t.time ? `<div class="meta">${fmtHM(t.time)}</div>` : ''}</div><button class="iconbtn" data-a="start" data-id="${t.id}" aria-label="Start">▶</button></div>`).join('')}` : ''}
-      <div class="quickadd" style="margin-top:10px"><input id="qa" placeholder="Add a mission — “math at 4pm”" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-a="qa" aria-label="Add">＋</button></div>
+      ${q.length || r || S.focus ? `<div class="quickadd" style="margin-top:10px"><input id="qa" placeholder="Add a mission — “math at 4pm”" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-a="qa" aria-label="Add">＋</button></div>` : ''}
+      ${!S.player.tag ? `<div class="card" style="border-color:var(--accent)"><b>Set up your player card</b><div class="faint" style="margin:4px 0 10px">Gamertag, emblem, banner. Takes 20 seconds.</div><button class="btn small primary" data-a="customize">Customize</button></div>` : ''}
       ${School.dueSoonHTML()}
       ${note ? `<div class="card" style="border-color:var(--gold)"><div class="faint">Message from ${esc(note.from || 'Dad')}</div><div style="font-size:18px;font-weight:600;margin:6px 0 10px">${esc(note.text)}</div><button class="btn small gold" data-a="readNote" data-id="${note.id}">Got it</button></div>` : ''}
       ${this.challengesCard()}
