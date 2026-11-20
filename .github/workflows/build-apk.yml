@@ -1,0 +1,53 @@
+name: Build MainQuest APK
+
+# Runs on every push to main, or manually from the Actions tab ("Run workflow").
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install and sync web app into Android project
+        run: |
+          npm ci
+          npx cap sync android
+
+      - name: Build APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk ../MainQuest.apk
+
+      - name: Upload APK (Actions artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MainQuest-apk
+          path: MainQuest.apk
+
+      - name: Publish to the "latest" release (easy phone download link)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest MainQuest.apk \
+            --title "MainQuest (build ${{ github.run_number }})" \
+            --notes "Open this page on the Android phone and tap MainQuest.apk to download and install."

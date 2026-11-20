@@ -1,0 +1,20 @@
+{
+  "name": "mainquest",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MainQuest - an ADHD-friendly mission tracker for kids",
+  "scripts": {
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.6.2",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/local-notifications": "^8.3.1",
+    "@capacitor/preferences": "^8.0.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2"
+  }
+}

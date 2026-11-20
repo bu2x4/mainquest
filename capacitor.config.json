@@ -1,0 +1,12 @@
+{
+  "appId": "app.mainquest.kid",
+  "appName": "MainQuest",
+  "webDir": "www",
+  "android": { "backgroundColor": "#14162b" },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_mainquest",
+      "iconColor": "#5ee0b5"
+    }
+  }
+}

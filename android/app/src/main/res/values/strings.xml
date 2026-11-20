@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MainQuest</string>
+    <string name="title_activity_main">MainQuest</string>
+    <string name="package_name">app.mainquest.kid</string>
+    <string name="custom_url_scheme">app.mainquest.kid</string>
+</resources>
