@@ -130,7 +130,7 @@ const Focus = {
         </svg>
       </div>
       <div class="center"><div class="timer-min" id="tmin"></div><div class="timer-lbl" id="tlbl"></div></div>
-      ${S.profile.style.helpers.includes('someone') || S.profile.style.reward === 'buddy' ? `<div class="row" style="justify-content:center;margin-top:8px"><span class="buddy-mini">${buddyEmoji()}</span><span class="faint">${esc(S.profile.buddyName)} is working with you</span></div>` : ''}
+      ${S.profile.style.helpers.includes('someone') || S.profile.style.reward === 'buddy' ? `<div class="row focus-buddy" style="justify-content:center;margin-top:8px"><span class="buddy-mini">${buddyEmoji()}</span><span class="faint">${esc(S.profile.buddyName)} is working with you</span></div>` : ''}
       <div class="focus-actions">
         ${isBreak ? `<button class="btn primary big" data-f="back">🎯 Back to mission</button>` : `
           ${cur ? `<button class="btn primary big" data-f="step">✅ Step done</button>` : `<button class="btn primary big" data-f="finish">🏁 I finished the mission!</button>`}

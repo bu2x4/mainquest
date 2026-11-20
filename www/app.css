@@ -229,5 +229,5 @@ body.calm *, body.calm *::before, body.calm *::after { animation: none !importan
 .dlg-box { background: var(--bg2); border-radius: 22px; padding: 20px; width: 100%; max-width: 420px; border: 2px solid var(--line); }
 .dlg-q { font-size: 19px; font-weight: 700; margin: 0 0 12px; }
 
-#overlay > * { width: 100%; max-width: 560px; margin-left: auto; margin-right: auto; }
-@media (max-height: 560px) { .big-emoji { font-size: 48px; margin: 6px 0 2px; } .timer-wrap { margin: 8px auto 4px; } .timer-min { font-size: 34px; } .focus-title { font-size: 20px; } .btn.big { min-height: 56px; font-size: 18px; } .breathe { width: 90px; height: 90px; margin: 8px auto; } }
+#overlay { padding-left: max(18px, calc((100vw - 560px) / 2)); padding-right: max(18px, calc((100vw - 560px) / 2)); }
+@media (max-height: 560px) { .big-emoji { font-size: 48px; margin: 6px 0 2px; } .timer-wrap { margin: 8px auto 4px; } .timer-min { font-size: 34px; } .focus-title { font-size: 20px; } .btn.big { min-height: 56px; font-size: 18px; } .breathe { width: 90px; height: 90px; margin: 8px auto; } .timer-wrap { width: min(72vw, 26vh); } .focus-buddy, .timer-lbl { display: none !important; } #overlay { padding-top: calc(8px + var(--safe-t)); } .focus-actions { gap: 8px; margin-top: 10px; } }
