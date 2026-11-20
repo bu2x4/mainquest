@@ -151,7 +151,7 @@ details.fold[open] > summary::before { transform: rotate(90deg); }
 .focus-top { display: flex; justify-content: space-between; align-items: center; }
 .focus-title { font-size: 24px; font-weight: 800; text-align: center; margin: 8px 0 2px; }
 .focus-step { text-align: center; color: var(--muted); font-size: 18px; min-height: 26px; }
-.timer-wrap { position: relative; width: min(72vw, 300px); aspect-ratio: 1; margin: 18px auto 10px; }
+.timer-wrap { position: relative; width: min(72vw, 300px, 36vh); min-width: 120px; aspect-ratio: 1; margin: 18px auto 10px; }
 .timer-wrap svg { width: 100%; height: 100%; }
 .timer-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 .timer-min { font-size: 46px; font-weight: 800; }
@@ -228,3 +228,6 @@ body.calm *, body.calm *::before, body.calm *::after { animation: none !importan
 #dlg { position: fixed; inset: 0; background: rgba(5,6,20,.65); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
 .dlg-box { background: var(--bg2); border-radius: 22px; padding: 20px; width: 100%; max-width: 420px; border: 2px solid var(--line); }
 .dlg-q { font-size: 19px; font-weight: 700; margin: 0 0 12px; }
+
+#overlay > * { width: 100%; max-width: 560px; margin-left: auto; margin-right: auto; }
+@media (max-height: 560px) { .big-emoji { font-size: 48px; margin: 6px 0 2px; } .timer-wrap { margin: 8px auto 4px; } .timer-min { font-size: 34px; } .focus-title { font-size: 20px; } .btn.big { min-height: 56px; font-size: 18px; } .breathe { width: 90px; height: 90px; margin: 8px auto; } }
