@@ -3,10 +3,7 @@ name: Publish MainQuest web app (optional)
 # Optional: hosts the installable web version on GitHub Pages.
 # Enable once in repo Settings → Pages → Source: "GitHub Actions".
 on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ['www/**']
+  workflow_dispatch:   # manual only (Actions → Publish → Run) after enabling Pages
 
 permissions:
   contents: read
