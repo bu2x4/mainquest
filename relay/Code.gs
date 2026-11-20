@@ -1,6 +1,6 @@
 /**
  * MainQuest Drive relay — runs as YOU inside your Google account and files everything the phone sends into
- * Google Drive → MainQuest/<child>/…  Your Claude account (Google Drive connector + scheduled tasks) reads and
+ * Google Drive → your MainQuest folder (ROOT_FOLDER_ID) → <child>/…  Your Claude account (Google Drive connector + scheduled tasks) reads and
  * writes the same folders. Nothing is stored anywhere else.
  *
  * Setup (once): paste this file into script.google.com → run setup() → Deploy → New deployment → Web app,
@@ -10,14 +10,15 @@
  * PARENT key (dashboard reads everything, sends notes/approvals). The URL alone can do nothing.
  */
 
-const CHILD_NAME = 'My kid';          // ← change before running setup() (folder name only)
+const CHILD_NAME = 'My kid';          // ← change before running setup() (folder name only; you can rename it in Drive later)
+const ROOT_FOLDER_ID = '1IbG6v5rQzOqCvLVNDFYnSNoRgeKFIhAO';   // your MainQuest folder in Drive ('' = create "MainQuest" in My Drive)
 const ROOT_NAME = 'MainQuest';
 const VERSION = 3;
 
 /* ------------------------------------------------------------------ setup */
 function setup() {
   const P = PropertiesService.getScriptProperties();
-  const root = getOrCreate_(DriveApp.getRootFolder(), ROOT_NAME);
+  const root = ROOT_FOLDER_ID ? DriveApp.getFolderById(ROOT_FOLDER_ID) : getOrCreate_(DriveApp.getRootFolder(), ROOT_NAME);
   const kid = getOrCreate_(root, P.getProperty('CHILD') || CHILD_NAME);
   P.setProperty('CHILD', kid.getName());
   const ids = {};

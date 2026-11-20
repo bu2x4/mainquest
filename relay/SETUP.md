@@ -5,7 +5,8 @@ Google account. It receives data from his phone, files it into folders, and serv
 
 ## 1. Create the relay
 1. Go to **script.google.com**, signed in as you (not your son) → **New project**. Name it `MainQuest relay`.
-2. Delete what's in `Code.gs` and paste in all of [`Code.gs`](Code.gs). On line 15, change `CHILD_NAME = 'My kid'` to his name.
+2. Delete what's in `Code.gs` and paste in all of [`Code.gs`](Code.gs). Near the top, change `CHILD_NAME = 'My kid'` to his name. `ROOT_FOLDER_ID` already points to your MainQuest folder
+   (`drive.google.com/drive/folders/1IbG6v5rQzOqCvLVNDFYnSNoRgeKFIhAO`). **Do this signed in as the Google account that owns that folder.**
 3. **＋ next to Files → HTML**, name it exactly `Dashboard`, delete its contents, and paste in all of [`Dashboard.html`](Dashboard.html).
 4. *(Recommended)* **Services ＋ → Drive API → Add.** This lets the relay turn paper photos into text (OCR), so Claude can read them reliably.
 5. At the top, pick the function **setup** → **Run**. Google asks for permission; approve it for your own account.
