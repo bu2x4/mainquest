@@ -12,4 +12,10 @@ const APP_CONFIG = {
     monthlyLimit: 100,    // study-pack builds per calendar month (0 = no limit)
   },
   planDays: 7,            // rolling planner length
+  cloud: {
+    // Parent link: the /exec URL of your Drive relay (relay/Code.gs deployed as an Apps Script web app).
+    // Leave blank to type it on the phone in Grown-up zone → Parent dashboard. The URL alone can't read anything.
+    url: '',
+  },
 };
+const APP_VERSION = '3.0.0';

@@ -88,9 +88,9 @@ const UI = {
     const dk = today(); r.log[dk] = r.log[dk] || [];
     const arr = r.log[dk];
     if (arr.includes(itemId)) { arr.splice(arr.indexOf(itemId), 1); save(); return; }
-    arr.push(itemId); award(XP.routineItem); markGoodDay(); Sfx.play('step'); buzz();
+    arr.push(itemId); award(XP.routineItem); markGoodDay(); Sfx.play('step'); buzz(); T.log('routine_item', { routine: r.id, item: itemId });
     if (itemId === 'r-bed-0') S.stats.loadout++;
-    if (arr.length >= r.items.length) { track('routine:' + r.id); if (r.id === 'r-sunday') unlockAch('gameplan'); award(XP.routineAll); Sfx.play('done'); confetti(0.7); buzz('success'); this.toast(`${r.name}: cleared. +${XP.routineAll + XP.routineItem} XP`); }
+    if (arr.length >= r.items.length) { T.log('routine_done', { routine: r.id, late_min: Math.round((Date.now() - atTime(r.time)) / 60e3) }); track('routine:' + r.id); if (r.id === 'r-sunday') unlockAch('gameplan'); award(XP.routineAll); Sfx.play('done'); confetti(0.7); buzz('success'); this.toast(`${r.name}: cleared. +${XP.routineAll + XP.routineItem} XP`); }
     // keep logs for 30 days
     const cutoff = dayKey(addDays(new Date(), -30)); Object.keys(r.log).forEach(k => { if (k < cutoff) delete r.log[k]; });
     save();
@@ -193,7 +193,7 @@ const UI = {
       <button class="list-btn" data-a="checkins">Focus check-ins: <b style="margin-left:6px">${{ off: 'Off', gentle: 'Once per sprint', normal: 'Every few minutes' }[S.settings.checkins]}</b><span class="chev">›</span></button>
       <button class="list-btn" data-a="notifs">Reminders &amp; notifications<span class="chev">›</span></button>
       <button class="list-btn" data-a="parent">Grown-up zone<span class="chev">›</span></button>
-      <p class="faint center" style="margin-top:16px">Grown-ups see: missions cleared, what’s due, focus minutes. Not your parking lot.${S.settings.parentSeen ? `<br>Last grown-up check: ${new Date(S.settings.parentSeen).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}</p>`;
+      <p class="faint center" style="margin-top:16px">${S.cloud.linked ? 'Shared with your grown-up’s dashboard: missions, focus time, check-ins, strategies you used, routines, assignments, papers, study and quiz results.' : 'Grown-ups see: missions cleared, what’s due, focus minutes.'} Never shared: your parking lot.${S.settings.parentSeen ? `<br>Last grown-up check: ${new Date(S.settings.parentSeen).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}</p>`;
   },
   statsSummary() {
     const out = [];
@@ -307,7 +307,7 @@ const UI = {
       ${S.parking.length ? `<h2>Parked</h2>${S.parking.map(p => `<div class="task"><span class="em">💭</span><div class="grow t" style="font-size:16px">${esc(p.text)}</div>
         <button class="iconbtn" data-x="promote" data-id="${p.id}" aria-label="Make mission">＋</button><button class="iconbtn" data-x="drop" data-id="${p.id}" aria-label="Clear">✓</button></div>`).join('')}` : ''}`, root => {
       const input = $('#park-in', root); setTimeout(() => input.focus(), 50);
-      const park = () => { const v = input.value.trim(); if (!v) { this.closeSheet(); cb && cb(); return; } S.parking.unshift({ id: uid(), text: v, at: Date.now() }); save({ noSchedule: true }); this.closeSheet(); this.toast('Parked 🅿️ Back to it!'); cb && cb(); if (!S.focus) this.render(); };
+      const park = () => { const v = input.value.trim(); if (!v) { this.closeSheet(); cb && cb(); return; } S.parking.unshift({ id: uid(), text: v, at: Date.now() }); T.log('park', {}); save({ noSchedule: true }); this.closeSheet(); this.toast('Parked 🅿️ Back to it!'); cb && cb(); if (!S.focus) this.render(); };
       input.onkeydown = e => { if (e.key === 'Enter') park(); };
       root.onclick = e => {
         const b = e.target.closest('[data-x]'); if (!b) return;
@@ -361,13 +361,13 @@ const UI = {
           t.parkedAuto = false;
           return this.taskSheet(t);
         }
-        if (x === 'anchor') { t.anchor = k; if (k) { const a = S.settings.anchors[k]; t.time = a || (k === 'beforebed' ? fmt24(new Date(+atTime(S.settings.bedtime) - 75 * 60e3)) : t.time); } return draw(); }
+        if (x === 'anchor') { t.anchor = k; if (k) T.log('when_then', { anchor: k }); if (k) { const a = S.settings.anchors[k]; t.time = a || (k === 'beforebed' ? fmt24(new Date(+atTime(S.settings.bedtime) - 75 * 60e3)) : t.time); } return draw(); }
         if (x === 'notime') { t.time = ''; t.anchor = ''; return draw(); }
         if (x === 'size') { t.size = k; return draw(); }
         if (x === 'stepdone') { const s = t.steps[+b.dataset.i]; s.done = !s.done; if (s.done) { award(XP.step); Sfx.play('step'); markGoodDay(); } return draw(); }
         if (x === 'stepdel') { t.steps.splice(+b.dataset.i, 1); return draw(); }
         if (x === 'stepadd') { const v = $('#ts-step', root).value.trim(); if (v) t.steps.push({ id: uid(), text: v, done: false }); return draw(); }
-        if (x === 'chop') { t.steps = t.steps.filter(s => s.done).concat(suggestSteps(t.title, k === '1').map(text => ({ id: uid(), text, done: false }))); if (t.steps.length >= 5 && t.size === 'small') t.size = 'big'; return draw(); }
+        if (x === 'chop') { T.log('steps_added', { from: 'mission' }); t.steps = t.steps.filter(s => s.done).concat(suggestSteps(t.title, k === '1').map(text => ({ id: uid(), text, done: false }))); if (t.steps.length >= 5 && t.size === 'small') t.size = 'big'; return draw(); }
         if (x === 'gearadd') { const g = await ask('What do you need for this?', { input: true, placeholder: 'e.g. calculator', ok: 'Add' }); if (g) { t.gear = t.gear || []; t.gear.push(g); } return draw(); }
         if (x === 'gearsuggest') { t.gear = suggestGear(t.title); return draw(); }
         if (x === 'geardel') { t.gear.splice(+b.dataset.i, 1); return draw(); }
@@ -435,14 +435,14 @@ const UI = {
         if (x === 'day') { Sfx.play('tap'); return this.planSheet(b.dataset.k); }
         if (x === 'prev' || x === 'next') { const n = (idx + (x === 'next' ? 1 : -1) + N) % N; Sfx.play('tap'); return this.planSheet(days[n]); }
         if (x === 'add') return addTyped();
-        if (x === 'anchor') { const i = anchors.indexOf(t.anchor || ''); const nx = anchors[(i + 1) % anchors.length]; t.anchor = nx; t.time = nx ? anchorTime(nx) : ''; save(); return this.planSheet(dk); }
+        if (x === 'anchor') { const i = anchors.indexOf(t.anchor || ''); const nx = anchors[(i + 1) % anchors.length]; t.anchor = nx; if (nx) T.log('when_then', { anchor: nx }); t.time = nx ? anchorTime(nx) : ''; save(); return this.planSheet(dk); }
         if (x === 'mv') { const ni = idx + +b.dataset.k; t.date = dayKey(addDays(new Date(dk + 'T12:00'), +b.dataset.k)); t.when = 'today'; save(); this.toast(`Moved to ${ni === 0 ? 'today' : ni === 1 ? 'tomorrow' : new Date(t.date + 'T12:00').toLocaleDateString(undefined, { weekday: 'long' })}`); return this.planSheet(dk); }
         if (x === 'park') { t.when = 'later'; t.date = null; t.time = ''; t.anchor = ''; save(); this.toast('Moved to Later'); return this.planSheet(dk); }
         if (x === 'pull') { t.when = 'today'; t.date = dk; t.parkedAuto = false; save(); Sfx.play('coin'); return this.planSheet(dk); }
         if (x === 'due') { this._ret = () => this.planSheet(dk); return School.assignmentSheet(null, { due: dk === today() ? dayKey(addDays(new Date(), 1)) : dk }); }
         if (x === 'study') { this._ret = () => this.planSheet(dk); return Cal.studySheet(dk); }
         if (x === 'event') { this._ret = () => this.planSheet(dk); return Cal.eventSheet(null, dk); }
-        if (x === 'done') { track('plan'); this._planDay = null; this.closeSheet(); this.render(); this.toast('Plan locked. One at a time.'); }
+        if (x === 'done') { track('plan'); T.log('plan', { planned_next7: S.tasks.filter(t => !t.done && t.date && daysUntil(t.date) >= 0 && daysUntil(t.date) < 7).length }); this._planDay = null; this.closeSheet(); this.render(); this.toast('Plan locked. One at a time.'); }
       };
     });
   },
@@ -588,7 +588,14 @@ const UI = {
         return `<div class="card ai-card">
         <div class="row"><div class="grow"><b>Status</b><div class="faint">${esc(stt.label)}</div></div><span class="pill ${stt.ready ? 'gold' : ''}">${stt.ready ? 'LIVE' : ai.on ? 'ON' : 'OFF'}</span></div>
         <div class="list-btn" data-x="aion" style="margin-top:10px">Connection ${ai.on ? 'on' : 'off'}<span class="switch ${ai.on ? 'on' : ''}" style="margin-left:auto"></span></div>
-        <p class="faint" style="margin:2px 2px 0">Off = no network calls and no AI anywhere in his app. He can still scan papers and make his own flashcards. Settings below are kept while it's off.</p>
+        <p class="faint" style="margin:2px 2px 0">Off = no AI anywhere in his app. He can still scan papers and make his own flashcards. Settings below are kept while it's off.</p>
+        <label class="lbl">Who builds the study packs</label>
+        <div class="chips"><button class="chip ${ai.via === 'drive' ? 'on' : ''}" data-x="aivia" data-k="drive">Your Claude account (via Drive)</button><button class="chip ${ai.via !== 'drive' ? 'on' : ''}" data-x="aivia" data-k="api">API key on this phone</button></div>
+        ${ai.via === 'drive' ? `<p class="faint" style="margin:6px 2px 0">Papers he sends go to Drive → MainQuest → Claude/Jobs. A scheduled task in your Claude account builds the pack and the phone picks it up on its next sync. No API key or per-use cost on the phone. ${S.cloud.linked ? '' : '<b>Link the parent dashboard below first.</b>'}</p>
+        <div class="grid2" style="margin-top:12px"><div><div class="faint">Monthly limit (0 = none)</div><input class="field" id="ai-limit" type="number" min="0" value="${ai.monthlyLimit ?? 100}"></div><div></div></div>
+        <div class="faint" style="margin-top:8px">Sent this month: <b>${u.builds}</b>${ai.monthlyLimit ? ` of ${ai.monthlyLimit}` : ''} · <button class="linkish" data-x="aireset">reset</button></div>
+        <div class="btn-row"><button class="btn small primary" data-x="aisave">Save AI settings</button></div>
+      </div>` : `<div>
         <label class="lbl">API key <span class="faint">(console.anthropic.com → API keys)</span></label>
         <div class="row"><input class="field grow" id="ai-key" type="password" value="${esc(ai.key)}" placeholder="sk-ant-…" autocomplete="off" spellcheck="false"><button class="btn small" data-x="aishow">Show</button></div>
         <label class="lbl">Model</label>
@@ -609,7 +616,11 @@ const UI = {
         <div class="btn-row"><button class="btn small primary" data-x="aisave">Save AI settings</button><button class="btn small" data-x="aitest">Test connection</button></div>
         ${ai.lastTest ? `<div class="faint" style="margin-top:8px">Last test: ${ai.lastTest.ok ? '✓ connected' : '✕ ' + esc(ai.lastTest.msg)} · ${new Date(ai.lastTest.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>` : ''}
         <details class="fold"><summary>What gets sent</summary><p class="sub" style="margin:0">Only the photos of a paper, his grade, and the TEKS list for that grade — and only when he taps “Build study pack.” No name or account. Instructions tell the AI never to answer the actual homework; it teaches the ideas and writes similar practice. Typical cost is a few cents per paper. The key is stored only on this phone.</p></details>
+      </div>`}
       </div>`; })()}
+
+      <h2>📊 Parent dashboard</h2>
+      ${Cloud.adminHTML()}
 
       <h2>📆 Google Calendar sync</h2>
       ${GSync.adminHTML()}
@@ -647,6 +658,7 @@ const UI = {
       };
       root.onclick = async e => {
         const b = e.target.closest('[data-x]'); if (!b) return; const x = b.dataset.x, id = b.dataset.id;
+        if (['clpair', 'clsync', 'clphotos', 'clunlink'].includes(x)) { const sc = $('#sheet').scrollTop; if (await Cloud.adminClick(x, b, root) !== false) { await this.parentZone(); $('#sheet').scrollTop = sc; } return; }
         if (['gconnect', 'gon', 'gread', 'gwrite', 'gtog', 'ginv', 'gcadd', 'gcdel', 'gsync', 'grefresh', 'gtest', 'gdisconnect'].includes(x)) { const sc = $('#sheet').scrollTop; if (await GSync.adminClick(x, b, root) !== false) { await this.parentZone(); $('#sheet').scrollTop = sc; } return; }
         if (x === 'note') { const v = $('#pz-note', root).value.trim(); if (v) { S.notes.unshift({ id: uid(), text: v, from: 'Dad', at: Date.now(), read: false }); S.notes = S.notes.slice(0, 20); save({ noSchedule: true }); this.toast('Note sent 💌'); $('#pz-note', root).value = ''; } }
         if (x === 'given') { const r = S.redemptions.find(r => r.id === id); r.status = 'given'; r.givenAt = Date.now(); save({ noSchedule: true }); this.parentZone(); }
@@ -664,6 +676,7 @@ const UI = {
         if (x === 'aimodel') { pullAI(); if (b.dataset.k !== '__custom') st.ai.model = b.dataset.k; else { const m = $('#ai-model', root); m.style.display = ''; m.focus(); $$('[data-x=aimodel]', root).forEach(c => c.classList.toggle('on', c === b)); return; } save({ noSchedule: true }); return this.parentZone(); }
         if (x === 'aireset') { aiUsage().builds = 0; save({ noSchedule: true }); return this.parentZone(); }
         if (x === 'aidefaults') { Object.assign(st.ai, { endpoint: APP_CONFIG.ai.endpoint, apiVersion: APP_CONFIG.ai.apiVersion, model: APP_CONFIG.ai.model, maxPages: APP_CONFIG.ai.maxPages, monthlyLimit: APP_CONFIG.ai.monthlyLimit }); save({ noSchedule: true }); this.toast('Defaults restored (key kept)'); return this.parentZone(); }
+        if (x === 'aivia') { pullAI(); st.ai.via = b.dataset.k; save({ noSchedule: true }); return this.parentZone(); }
         if (x === 'aisave') { pullAI(); save({ noSchedule: true }); this.toast('AI settings saved'); return this.parentZone(); }
         if (x === 'aitest') {
           pullAI(); save({ noSchedule: true });
@@ -754,6 +767,7 @@ const UI = {
       ${rest.length ? `<div class="list-head"><span>Up next</span>${q.length > rest.length + 1 ? `<span class="faint">+${q.length - rest.length - 1} more</span>` : ''}</div>${rest.map(t => `<div class="task" data-a="openTask" data-id="${t.id}"><span class="em">${esc(t.emoji)}</span><div class="grow"><div class="t">${esc(t.title)}</div>${t.time ? `<div class="meta">${fmtHM(t.time)}</div>` : ''}</div><button class="iconbtn" data-a="start" data-id="${t.id}" aria-label="Start">▶</button></div>`).join('')}` : ''}
       ${q.length || r || S.focus ? `<div class="quickadd" style="margin-top:10px"><input id="qa" placeholder="Add a mission — “math at 4pm”" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-a="qa" aria-label="Add">＋</button></div>` : ''}
       ${!S.player.tag ? `<div class="card" style="border-color:var(--accent)"><b>Set up your player card</b><div class="faint" style="margin:4px 0 10px">Gamertag, emblem, banner. Takes 20 seconds.</div><button class="btn small primary" data-a="customize">Customize</button></div>` : ''}
+      ${Cloud.targetsCard()}
       ${GSync.invitesCard()}
       ${School.dueSoonHTML()}
       ${note ? `<div class="card" style="border-color:var(--gold)"><div class="faint">Message from ${esc(note.from || 'Dad')}</div><div style="font-size:18px;font-weight:600;margin:6px 0 10px">${esc(note.text)}</div><button class="btn small gold" data-a="readNote" data-id="${note.id}">Got it</button></div>` : ''}
@@ -849,7 +863,7 @@ const UI = {
           <button class="list-btn" data-a="notNow" data-id="${t.id}"><span class="em">⏭</span>Do a different one first<span class="chev">›</span></button>
           <button class="list-btn" data-a="park"><span class="em">🙋</span>Write down what I need help with<span class="chev">›</span></button>`, root => root.onclick = ev => { this.closeSheet(); this.onClick(ev); });
       case 'two': this.closeSheet(); return Focus.start(id, 2, 'mini');
-      case 'chop': t.steps = (t.steps || []).filter(s => s.done).concat(suggestSteps(t.title, false).map(text => ({ id: uid(), text, done: false }))); save(); this.render(); return this.toast('Broken into steps. Tap the mission to edit them.');
+      case 'chop': T.log('steps_added', { from: 'home' }); t.steps = (t.steps || []).filter(s => s.done).concat(suggestSteps(t.title, false).map(text => ({ id: uid(), text, done: false }))); save(); this.render(); return this.toast('Broken into steps. Tap the mission to edit them.');
       case 'openTask': return this.taskSheet(t);
       case 'qa': return this.quickAdd($('#qa').value);
       case 'qaNow': return this.quickAdd($('#qa-now').value);
@@ -881,6 +895,7 @@ const UI = {
       case 'redeem': {
         const r = S.rewards.find(x => x.id === id); if (S.stats.coins < r.cost) return;
         if (!(await ask(`Spend ${r.cost} coins on “${r.name}”?`, { ok: 'Redeem' }))) return;
+        T.log('redeem', { cost: r.cost });
         S.stats.coins -= r.cost; S.redemptions.unshift({ id: uid(), rewardId: r.id, name: r.name, emoji: r.emoji, cost: r.cost, at: Date.now(), status: 'pending' });
         save({ noSchedule: true }); Sfx.play('level'); confetti(1); this.render(); return this.toast('Requested. Show a grown-up to collect.');
       }

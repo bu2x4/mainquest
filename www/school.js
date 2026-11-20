@@ -54,7 +54,7 @@ const School = {
         ${byDay[d].map(p => `<button class="arow" data-a="openPaper" data-id="${p.id}" style="--sc:${subj(p.subject).color}">
           <span class="thumb" data-thumb="${p.imageIds[0] || ''}"></span>
           <span class="grow"><span class="arow-t">${esc(p.title || 'Untitled paper')}</span>
-          <span class="arow-m">${esc(subj(p.subject).name)} · ${p.imageIds.length} page${p.imageIds.length === 1 ? '' : 's'} · ${{ saved: 'saved', processing: 'building study pack…', ready: 'study pack ready', error: 'tap to retry' }[p.status] || ''}</span></span>
+          <span class="arow-m">${esc(subj(p.subject).name)} · ${p.imageIds.length} page${p.imageIds.length === 1 ? '' : 's'} · ${{ saved: 'saved', processing: 'building study pack…', queued: 'study pack on the way', ready: 'study pack ready', error: 'tap to retry' }[p.status] || ''}</span></span>
           <span class="chev">›</span></button>`).join('')}`).join('')}`;
   },
 
@@ -172,7 +172,8 @@ const School = {
     const data = await this.capture(); if (!data) return;
     const imgId = 'img-' + uid(); await IDB.put(imgId, data);
     let p = addTo;
-    if (!p) { p = { id: uid(), date: today(), created: Date.now(), subject: 'other', title: '', imageIds: [], status: 'saved' }; S.papers.push(p); }
+    if (!p) { p = { id: uid(), date: today(), created: Date.now(), subject: 'other', title: '', imageIds: [], status: 'saved' }; S.papers.push(p); T.log('paper_scanned', { same_day: true }); }
+    p.cloudDirty = true;
     p.imageIds.push(imgId);
     if (!S.stats.scanDays[today()]) { S.stats.scanDays[today()] = 1; award(XP.scan); track('scanday'); } else award(1);
     // tick the "scan papers" routine step if it's active today
@@ -194,10 +195,12 @@ const School = {
       <input class="field" id="pp-title" value="${esc(p.title || '')}" placeholder="What is it? e.g. Fractions worksheet">
       <label class="lbl">Subject</label><div class="chips">${SUBJECTS.map(s => `<button class="chip ${p.subject === s.id ? 'on' : ''}" data-x="subj" data-k="${s.id}">${s.icon} ${s.name}</button>`).join('')}</div>
       ${p.status === 'processing' ? `<div class="card soft center" style="margin-top:14px"><div class="spinner"></div><b>Building your study pack…</b><div class="faint">Reading the paper, matching TEKS, writing flashcards + a quiz.</div></div>` : ''}
+      ${p.status === 'queued' ? `<div class="card soft center" style="margin-top:14px"><b>📨 Study pack on the way</b><div class="faint">It shows up here after the next study run (usually within the hour). You can make your own cards meanwhile.</div></div>` : ''}
       ${p.status === 'error' ? `<div class="card soft" style="margin-top:14px"><b>Couldn’t build it</b><div class="faint">${esc(p.error || '')}</div></div>` : ''}
       ${st ? this.packHTML(p) : ''}
       <div class="spacer"></div>
-      ${p.status !== 'processing' ? (aiOn ? `<button class="btn primary big" data-x="build">${st ? '↻ Rebuild study pack' : '✨ Build study pack'}</button><button class="btn ghost block" data-x="manual" style="margin-top:8px">✍️ Add my own flashcards</button>` : `<button class="btn primary big" data-x="manual">✍️ Make flashcards</button>`) : ''}
+      ${p.status === 'queued' ? `<button class="btn ghost block" data-x="manual">✍️ Make my own cards meanwhile</button>` : ''}
+      ${p.status !== 'processing' && p.status !== 'queued' ? (aiOn ? `<button class="btn primary big" data-x="build">${st ? '↻ Rebuild study pack' : '✨ Build study pack'}</button><button class="btn ghost block" data-x="manual" style="margin-top:8px">✍️ Add my own flashcards</button>` : `<button class="btn primary big" data-x="manual">✍️ Make flashcards</button>`) : ''}
       <div class="btn-row"><button class="btn" data-x="assign">📌 Add due date</button><button class="btn" data-x="save">Save</button></div>
       <div class="btn-row"><button class="btn ghost" data-x="delete">Delete paper</button></div>`, root => {
       this.loadThumbs(root);
@@ -234,17 +237,13 @@ const School = {
   },
 
   /* ================================================================ Study AI (Claude, via the parent's API key) */
-  async build(p) {
-    const ai = S.settings.ai; const stt = aiStatus();
-    if (!stt.ready) { p.status = 'error'; p.error = stt.code === 'limit' ? 'This month’s Study AI limit is used up. A grown-up can raise it.' : 'Study AI isn’t turned on.'; save({ noSchedule: true }); return; }
-    p.status = 'processing'; p.error = ''; save({ noSchedule: true });
-    try {
-      const images = []; for (const id of p.imageIds.slice(0, Math.max(1, ai.maxPages || 6))) { const d = await IDB.get(id); if (d) images.push(d); }
-      const g = S.player.grade;
-      const teksText = ['math', 'science', 'ela', 'social'].map(k => `${k.toUpperCase()}:\n` + teksFor(g, k).map(([c, d]) => `  ${c} — ${d}`).join('\n')).join('\n');
-      const now = new Date();
-      const prompt = `Today is ${now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} (${today()}). The student is in grade ${g} in Texas and has ADHD.
-These photos are ${p.imageIds.length} page(s) of a paper they got at school. Subject hint: ${p.subject}. Title hint: ${p.title || 'none'}.
+  /* Same rules whether the pack is built by the in-app API key or by the parent's Claude account (via Drive). */
+  studyPrompt(p, pages) {
+    const g = S.player.grade;
+    const teksText = ['math', 'science', 'ela', 'social'].map(k => `${k.toUpperCase()}:\n` + teksFor(g, k).map(([c, d]) => `  ${c} — ${d}`).join('\n')).join('\n');
+    const now = new Date();
+    return `Today is ${now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} (${today()}). The student is in grade ${g} in Texas and has ADHD.
+These photos are ${pages} page(s) of a paper they got at school. Subject hint: ${p.subject}. Title hint: ${p.title || 'none'}.
 
 Build a study pack. Rules:
 - Teach the ideas and make SIMILAR practice. Never solve or give answers to the actual problems or questions printed on the paper (it may be graded homework).
@@ -265,8 +264,43 @@ Return ONLY JSON:
  "summary": str, "key_terms": [{"term": str, "meaning": str}], "flashcards": [{"q": str, "a": str}],
  "quiz": [{"q": str, "choices": [str,str,str,str], "answer": 0-3, "why": str}],
  "teks": [{"code": str, "why": str}], "study_steps": [str], "parent_note": str|null}`;
+  },
+  jobFor(p) {
+    return { grade: S.player.grade, subject: p.subject, title: p.title || null, pages: p.imageIds.length, requested_from: 'MainQuest ' + APP_VERSION,
+      instructions: this.studyPrompt(p, p.imageIds.length) };
+  },
+  applyStudy(p, json, model) {
+    const valid = new Set(['math', 'science', 'ela', 'social', 'other']);
+    const study = {
+      summary: String(json.summary || ''), key_terms: (json.key_terms || []).slice(0, 12),
+      flashcards: (json.flashcards || []).slice(0, 20).map(c => ({ q: String(c.q), a: String(c.a), box: 0 })),
+      quiz: (json.quiz || []).filter(q => Array.isArray(q.choices) && q.choices.length >= 2 && Number.isInteger(+q.answer)).slice(0, 10),
+      teks: (json.teks || []).filter(t => t && t.code).slice(0, 4), study_steps: (json.study_steps || []).slice(0, 6), parent_note: json.parent_note || null, model, at: Date.now(),
+    };
+    const as = json.assignment || {};
+    if (as.due_date && /^\d{4}-\d{2}-\d{2}$/.test(as.due_date) && daysUntil(as.due_date) >= 0 && daysUntil(as.due_date) <= 90 && as.type !== 'none')
+      study.suggested = { due: as.due_date, type: ATYPES.some(t => t.id === as.type) ? as.type : 'homework', title: json.title };
+    if (!p.title && json.title) p.title = String(json.title).slice(0, 80);
+    if (p.subject === 'other' && valid.has(json.subject)) p.subject = json.subject;
+    p.study = study; p.status = 'ready'; p.error = ''; T.log('study_pack', { subject: p.subject, teks: study.teks.map(t => t.code), via: model });
+    if (p.assignmentId) { const a = S.assignments.find(x => x.id === p.assignmentId); if (a && !(a.teks || []).length) a.teks = study.teks.map(t => t.code); }
+    award(5); save({ noSchedule: true });
+    return study;
+  },
+
+  async build(p) {
+    const ai = S.settings.ai; const stt = aiStatus();
+    if (!stt.ready) { p.status = 'error'; p.error = stt.code === 'limit' ? 'This month’s Study AI limit is used up. A grown-up can raise it.' : stt.code === 'nolink' ? 'Link the parent dashboard first (Grown-up zone).' : 'Study AI isn’t turned on.'; save({ noSchedule: true }); return; }
+    if (ai.via === 'drive') {
+      p.status = 'queued'; p.error = ''; p.jobSent = 0; aiUsage().builds++; save({ noSchedule: true });
+      UI.toast('Sent to the study builder 📨'); Cloud.sync('job');
+      return;
+    }
+    p.status = 'processing'; p.error = ''; save({ noSchedule: true });
+    try {
+      const images = []; for (const id of p.imageIds.slice(0, Math.max(1, ai.maxPages || 6))) { const d = await IDB.get(id); if (d) images.push(d); }
       const content = images.map(d => ({ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: d.split(',')[1] } }));
-      content.push({ type: 'text', text: prompt });
+      content.push({ type: 'text', text: this.studyPrompt(p, p.imageIds.length) });
       aiUsage().builds++; save({ noSchedule: true });
       const res = await fetch(ai.endpoint || APP_CONFIG.ai.endpoint, {
         method: 'POST', headers: aiHeaders(),
@@ -279,21 +313,7 @@ Return ONLY JSON:
       const data = await res.json();
       const txt = (data.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
       const json = JSON.parse(txt.slice(txt.indexOf('{'), txt.lastIndexOf('}') + 1));
-      const valid = new Set(['math', 'science', 'ela', 'social', 'other']);
-      const study = {
-        summary: String(json.summary || ''), key_terms: (json.key_terms || []).slice(0, 12),
-        flashcards: (json.flashcards || []).slice(0, 20).map(c => ({ q: String(c.q), a: String(c.a), box: 0 })),
-        quiz: (json.quiz || []).filter(q => Array.isArray(q.choices) && q.choices.length >= 2).slice(0, 10),
-        teks: (json.teks || []).slice(0, 4), study_steps: (json.study_steps || []).slice(0, 6), parent_note: json.parent_note || null, model: ai.model, at: Date.now(),
-      };
-      const as = json.assignment || {};
-      if (as.due_date && /^\d{4}-\d{2}-\d{2}$/.test(as.due_date) && daysUntil(as.due_date) >= 0 && daysUntil(as.due_date) <= 90 && as.type !== 'none')
-        study.suggested = { due: as.due_date, type: ATYPES.some(t => t.id === as.type) ? as.type : 'homework', title: json.title };
-      if (!p.title && json.title) p.title = String(json.title).slice(0, 80);
-      if (p.subject === 'other' && valid.has(json.subject)) p.subject = json.subject;
-      p.study = study; p.status = 'ready';
-      if (p.assignmentId) { const a = S.assignments.find(x => x.id === p.assignmentId); if (a && !(a.teks || []).length) a.teks = study.teks.map(t => t.code); }
-      award(5); save({ noSchedule: true });
+      const study = this.applyStudy(p, json, ai.model);
       UI.toast(`Study pack ready: ${study.flashcards.length} cards, ${study.quiz.length} quiz questions`);
     } catch (e) {
       p.status = 'error'; p.error = e.message && !/JSON/.test(e.message) ? e.message : (navigator.onLine === false ? 'No internet connection.' : 'Couldn’t read the response. Try again.');
@@ -334,7 +354,7 @@ Return ONLY JSON:
     const a = p.assignmentId && S.assignments.find(x => x.id === p.assignmentId);
     const draw = () => {
       if (i >= queue.length) {
-        award(Math.min(xp, 20)); track('card', queue.length);
+        award(Math.min(xp, 20)); track('card', queue.length); T.log('cards', { n: queue.length, known: got, subject: p.subject });
         if (a && got) damageBoss(a, Math.round(got * 4));
         save({ noSchedule: true }); Sfx.play('done'); confetti(.6);
         return UI.sheet(`<div class="grab"></div><div class="big-emoji">🃏</div><h3 class="center">Deck cleared</h3><p class="center sub">${got}/${queue.length} known · +${Math.min(xp, 20)} XP${a && a.maxHp && got ? ` · ${esc(a.boss)} took damage` : ''}</p>
@@ -364,7 +384,7 @@ Return ONLY JSON:
     const draw = () => {
       if (i >= qs.length) {
         const pct = Math.round(score / qs.length * 100);
-        S.stats.quizzes++; award(XP.quiz + Math.round(pct / 10)); track('quiz'); if (pct >= 90) unlockAch('ace');
+        S.stats.quizzes++; award(XP.quiz + Math.round(pct / 10)); track('quiz'); T.log('quiz', { pct, n: qs.length, subject: p.subject, teks: (p.study.teks || []).map(t => t.code) }); if (pct >= 90) unlockAch('ace');
         const dmg = a ? Math.round(pct / 2) : 0; const bm = a && dmg ? damageBoss(a, dmg) : '';
         save({ noSchedule: true }); Sfx.play(pct >= 70 ? 'level' : 'done'); if (pct >= 70) confetti(1);
         return UI.sheet(`<div class="grab"></div><div class="big-emoji">${pct >= 90 ? '🏆' : pct >= 70 ? '🎯' : '📈'}</div><h3 class="center">${score}/${qs.length} · ${pct}%</h3>

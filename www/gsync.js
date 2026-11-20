@@ -138,6 +138,7 @@ const GSync = {
     try {
       await P.setRsvp({ eventId: ev.id, email: this.selfEmail(ev.calId), status });
       const me = this.selfEmail(ev.calId).toLowerCase();
+      T.log('invite_reply', { status });
       S.gevents.filter(x => x.id === ev.id).forEach(x => { x.selfStatus = status; x.attendees.forEach(a => { if ((a.email || '').toLowerCase() === me) a.status = status; }); });
       save({ noSchedule: true });
       try { await P.requestSync({ calendarIds: [ev.calId] }); } catch (e) { }

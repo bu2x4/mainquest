@@ -47,13 +47,27 @@ function freshState() {
       sound: true, haptics: true, calm: false, light: false, bigtext: false, dyslexic: false, weekGoal: 4, pin: '',
       anchors: { afterschool: '15:45', aftersnack: '16:15', afterdinner: '18:45' },
       gcal: { on: false, connected: false, cals: [], readIds: [], writeId: '', pushEvents: true, pushDue: true, pushStudy: false, remind: true, invites: 'approved', contacts: [], lastSync: 0, lastError: '' },
-      ai: { on: !!APP_CONFIG.ai.enabled, key: '', model: APP_CONFIG.ai.model, endpoint: APP_CONFIG.ai.endpoint, apiVersion: APP_CONFIG.ai.apiVersion,
+      ai: { on: !!APP_CONFIG.ai.enabled, via: APP_CONFIG.ai.via || 'drive', key: '', model: APP_CONFIG.ai.model, endpoint: APP_CONFIG.ai.endpoint, apiVersion: APP_CONFIG.ai.apiVersion,
         maxPages: APP_CONFIG.ai.maxPages, monthlyLimit: APP_CONFIG.ai.monthlyLimit, usage: { month: '', builds: 0 }, lastTest: null }, parentSeen: 0 },
-    gevents: [], gseen: {}, gdeletes: [],
+    gevents: [], gseen: {}, gdeletes: [], outbox: [], log: [], goals: [],
+    cloud: { linked: false, childId: '', childName: '', lastSync: 0, lastError: '', sharePhotos: true, url: '', key: '' },
     focus: null, fired: {},
   };
 }
 let S = load();
+
+/* ------------------------------------------------------------------ Activity log (feeds targets, the parent dashboard and counselor report).
+   Never logs the text of parked thoughts. */
+const T = {
+  log(type, data = {}) {
+    const e = { id: uid() + uid(), ts: new Date().toISOString(), type, data };
+    (S.outbox = S.outbox || []).push(e);
+    (S.log = S.log || []).push(e);
+    if (S.log.length > 3000 || (S.log[0] && Date.now() - Date.parse(S.log[0].ts) > 35 * 864e5)) S.log = S.log.filter(x => Date.now() - Date.parse(x.ts) < 35 * 864e5).slice(-3000);
+    if (S.outbox.length > 5000) S.outbox = S.outbox.slice(-5000);
+    if (typeof Cloud !== 'undefined') Cloud.soon();
+  },
+};
 function load() {
   try { const raw = localStorage.getItem(KEY); if (raw) return migrate(JSON.parse(raw)); } catch (e) { console.warn('load failed', e); }
   return freshState();
@@ -68,6 +82,7 @@ function migrate(s) {
   out.settings = { ...f.settings, ...s.settings, anchors: { ...f.settings.anchors, ...((s.settings || {}).anchors) }, ai: { ...f.settings.ai, ...((s.settings || {}).ai) }, gcal: { ...f.settings.gcal, ...((s.settings || {}).gcal) } };
   out.unlocked = { ...f.unlocked, ...s.unlocked };
   out.tips = { ...f.tips, ...s.tips };
+  out.cloud = { ...f.cloud, ...s.cloud };
   out.season = { ...f.season, ...s.season }; out.weekly = { ...f.weekly, ...s.weekly };
   if (!(s.v >= 2)) {
     // v1 → v2: add "scan papers" to after-school routine if missing
@@ -324,9 +339,12 @@ function completeTask(t, { actualMin = null } = {}) {
   let total = award(base); parts.push(`+${base} ${t.kind === 'study' ? 'study' : 'mission'}${boosted ? ' (2×)' : ''}`);
   const firstToday = !S.tasks.some(x => x !== t && x.done && x.doneAt && dayKey(new Date(x.doneAt)) === today());
   if (firstToday) { total += award(XP.warmup); parts.push(`+${XP.warmup} first of the day`); }
+  const a0 = t.assignmentId && S.assignments.find(x => x.id === t.assignmentId);
+  T.log('mission_done', { task: t.id, kind: t.kind, size: t.size, subject: a0 ? a0.subject : null, assignmentId: t.assignmentId || null, est: t.est || null, actual: actualMin || null, planned: !!t.time });
+  if (t.kind === 'study') T.log('study_done', { assignmentId: t.assignmentId || null, subject: a0 ? a0.subject : null });
   let estimateMsg = '';
   if (t.est && actualMin) {
-    S.stats.estimates.push({ est: t.est, act: actualMin, at: Date.now() }); track('guess');
+    S.stats.estimates.push({ est: t.est, act: actualMin, at: Date.now() }); track('guess'); T.log('estimate', { est: t.est, act: actualMin, subject: a0 ? a0.subject : null });
     const ratio = actualMin / t.est;
     if (ratio >= 0.7 && ratio <= 1.3) { total += award(XP.estimate); parts.push(`+${XP.estimate} Time Detective`); estimateMsg = `Guessed ${t.est} min, took ${actualMin}. Dialed in.`; }
     else estimateMsg = `Guessed ${t.est} min, took ${actualMin}. ${ratio > 1 ? 'Took longer than you thought — normal. Pad your next guess a bit.' : 'Faster than you thought.'}`;
@@ -392,6 +410,7 @@ function planAssignment(a) {
 function createAssignment(fields) {
   const a = { id: uid(), title: fields.title.trim(), subject: fields.subject || 'other', type: fields.type || 'homework', due: fields.due, created: Date.now(),
     notes: fields.notes || '', paperIds: fields.paperIds || [], status: 'open', teks: fields.teks || [] };
+  T.log('assignment_added', { type: a.type, subject: a.subject, due: a.due, lead_days: daysUntil(a.due), source: (fields.paperIds || []).length ? 'scan' : 'manual' });
   S.assignments.push(a); planAssignment(a); save();
   return a;
 }
@@ -405,6 +424,7 @@ function finishAssignment(a) {
   if (a.status === 'done') return;
   a.status = 'done'; a.doneAt = Date.now();
   const left = Math.round((new Date(a.due + 'T12:00:00') - new Date(today() + 'T12:00:00')) / 864e5);
+  T.log('assignment_done', { type: a.type, subject: a.subject, early_days: left });
   if (left >= 2) { unlockAch('speedrun'); track('early'); } else if (left === 0) unlockAch('clutch'); else if (left === 1) track('early');
 }
 function openAssignments() { return S.assignments.filter(a => a.status !== 'done').sort((a, b) => a.due < b.due ? -1 : 1); }
@@ -416,6 +436,7 @@ function aiUsage() { const ai = S.settings.ai; const m = today().slice(0, 7); if
 function aiStatus() {
   const ai = S.settings.ai;
   if (!ai.on) return { ready: false, code: 'off', label: 'Off' };
+  if (ai.via === 'drive') return S.cloud.linked ? (ai.monthlyLimit && aiUsage().builds >= ai.monthlyLimit ? { ready: false, code: 'limit', label: 'On — monthly limit reached' } : { ready: true, code: 'ready', label: 'On — via your Claude account (Drive)' }) : { ready: false, code: 'nolink', label: 'On — link the parent dashboard first' };
   if (!ai.key && /anthropic\.com/.test(ai.endpoint || '')) return { ready: false, code: 'nokey', label: 'On — needs an API key' };
   if (ai.monthlyLimit && aiUsage().builds >= ai.monthlyLimit) return { ready: false, code: 'limit', label: 'On — monthly limit reached' };
   return { ready: true, code: 'ready', label: 'On — ready' };
@@ -634,6 +655,8 @@ const Reminders = {
     }
   },
   onAction(action, extra) {
+    if (action === 'start') S._fromReminder = Date.now();
+    T.log('reminder_action', { action, kind: extra.kind || null });
     const t = extra.taskId && S.tasks.find(x => x.id === extra.taskId);
     if (action === 'snooze') {
       if (t) { const d = new Date(Date.now() + 10 * 60e3); t.time = `${pad(d.getHours())}:${pad(d.getMinutes())}`; save(); UI.toast('Snoozed 10 minutes ⏰'); }

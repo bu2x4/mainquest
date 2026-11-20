@@ -165,3 +165,9 @@ android/        Capacitor Android project (generated; native notifications)
 ---
 
 *MainQuest supports ADHD skill-building but doesn't replace professional care. Share it with his teacher or clinician if it helps them help him.*
+
+## Parent dashboard (data in your Google Drive)
+- **Where the data lives:** your own Google Drive, `MainQuest/<child>/`. It contains activity logs, daily summaries, assignments, paper photos, progress, requests, targets and reports. A Google Apps Script relay ([`relay/Code.gs`](relay/Code.gs)) running under your account files it there.
+- **Dashboard:** `<relay URL>?view=dashboard`, signed in with the parent key. It has eight tabs: Overview (KPIs vs the previous period, targets met, focus minutes, auto flags), Targets (Daily Report Card editor with raise/lower suggestions), Requests (rewards, wishes, notes, reward menu), School (assignments, on-time %, paper photos), Study (minutes, subjects, quizzes), Strategies (clinical names, evidence level, what good looks like, independence/fading signals), a printable **Counselor report** (with CSV export, before/after timeline, and medication entries excluded unless chosen) and Settings.
+- **Your Claude account as the AI:** study packs and weekly reports are produced by scheduled Claude tasks that read/write the Drive folder (see `MainQuest/README for Claude.md`, created by setup). No API key on the phone.
+- Setup: **[relay/SETUP.md](relay/SETUP.md)**. After editing `dashboard/`, run `node scripts/build-dashboard.js` to regenerate `relay/Dashboard.html`.

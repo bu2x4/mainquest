@@ -59,6 +59,8 @@ const Focus = {
     S.focus = { taskId, mode, planned: minutes, startAt: now, endAt: now + dur * 60e3, pausedAt: 0,
       stepIdx: Math.max(0, (t.steps || []).findIndex(s => !s.done)), nextCheck: this.nextCheckAt(now, dur), checks: 0, drifts: 0, warned: false };
     if (!t.firstStart) t.firstStart = now;
+    let latency; if (t.time && taskDate(t) <= today() && mode === 'sprint') { const l = Math.round((now - atTime(t.time)) / 60e3); if (l > -60 && l < 300) latency = Math.max(0, l); }
+    T.log(mode === 'move' ? 'move_first' : 'focus_start', { mode, planned: minutes, kind: t.kind, latency, task: t.id, prompted: !!(S._fromReminder && Date.now() - S._fromReminder < 5 * 60e3) });
     t.pin = 0;
     save({ noSchedule: true });
     this.panel = null;
@@ -96,6 +98,7 @@ const Focus = {
     const min = Math.max(0, (end - f.startAt) / 60e3);
     t.focusMin = (t.focusMin || 0) + min; S.stats.focusMin += min;
     S.stats.focusByDay[today()] = (S.stats.focusByDay[today()] || 0) + min; track('focusmin', min);
+    T.log('focus_end', { minutes: Math.round(min * 10) / 10, planned: f.planned, mode: f.mode, completed: end >= f.endAt - 1000, drifts: f.drifts || 0, checks: f.checks || 0, kind: t.kind, task: t.id });
     S.stats.sessions.push({ at: f.startAt, planned: f.planned, actual: Math.round(min * 10) / 10, hour: new Date(f.startAt).getHours(), drifts: f.drifts, completed: end >= f.endAt - 1000 });
     if (S.stats.sessions.length > 300) S.stats.sessions = S.stats.sessions.slice(-300);
     f.startAt = Date.now(); // prevents double-banking
@@ -216,6 +219,7 @@ const Focus = {
   startBreak(min = 3) {
     const f = S.focus; if (!f) return;
     const now = Date.now();
+    T.log('break', { min });
     Object.assign(f, { mode: 'break', breakMin: min, startAt: now, endAt: now + min * 60e3, pausedAt: 0, warned: false, move: '🤸 Try: ' + pick(MOVES), nextCheck: 0, extra: 0 });
     Reminders.focusNotify(FOCUS_END_ID, new Date(f.endAt), '🎯 Break’s over!', 'Jump back into your mission.');
     this.panel = null; save({ noSchedule: true }); this.render();
@@ -302,12 +306,13 @@ const Focus = {
       const b = e.target.closest('[data-p]'); if (!b) return;
       const p = b.dataset.p; const f = S.focus;
       Sfx.play('tap');
-      if (p === 'yes') { award(XP.checkin); this.panel = null; UI.toast('Locked in. +1'); save({ noSchedule: true }); this.render(); }
-      if (p === 'drift') { award(XP.checkin); f.drifts++; this.panel = 'refocus'; save({ noSchedule: true }); this.render(); }
-      if (p === 'resume') { if (this.panel === 'welcome' || this.panel === 'refocus') S.stats.comebacks++; this.panel = null; if (f.mode === 'break') { this.start(t.id, f.planned); return; } this.render(); }
+      if (p === 'yes') { T.log('checkin', { result: 'yes' }); award(XP.checkin); this.panel = null; UI.toast('Locked in. +1'); save({ noSchedule: true }); this.render(); }
+      if (p === 'drift') { T.log('checkin', { result: 'drift' }); award(XP.checkin); f.drifts++; this.panel = 'refocus'; save({ noSchedule: true }); this.render(); }
+      if (p === 'resume') { if (this.panel === 'welcome' || this.panel === 'refocus') { S.stats.comebacks++; T.log('refocus', { via: this.panel }); } this.panel = null; if (f.mode === 'break') { this.start(t.id, f.planned); return; } this.render(); }
       if (p === 'mini') { this.bankMinutes(); this.start(t.id, 5, 'mini'); }
       if (p === 'park') UI.parkSheet(() => { this.panel = null; this.render(); });
       if (p === 'stuck') { this.panel = 'stuck'; this.render(); }
+      if (['smaller', 'two', 'move', 'help', 'swap'].includes(p)) T.log('stuck_' + (p === 'smaller' ? 'smaller' : p), { task: t.id });
       if (p === 'smaller') {
         const fresh = suggestSteps(t.title, true).map(text => ({ id: uid(), text, done: false }));
         const old = (t.steps || []).filter(s => s.done);

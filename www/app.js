@@ -1,6 +1,7 @@
 'use strict';
 /* MainQuest boot: wiring, timers, lifecycle. */
 
+function logOpenSafe() { if (S.lastOpenLog !== today()) { S.lastOpenLog = today(); T.log('app_open', {}); save({ noSchedule: true }); } }
 (async function boot() {
   await restoreFromNative();
   tidyBacklog();
@@ -32,7 +33,7 @@
 
   document.addEventListener('visibilitychange', () => {
     Focus.onVisibility();
-    if (!document.hidden) { tidyBacklog(); if ($('#sheet-wrap').hidden) UI.render(); Reminders.tick(); Reminders.sync(); GSync.sync('resume'); }
+    if (!document.hidden) { tidyBacklog(); if ($('#sheet-wrap').hidden) UI.render(); Reminders.tick(); Reminders.sync(); GSync.sync('resume'); logOpenSafe(); Cloud.sync('resume'); }
   });
 
   // Web/PWA: service worker for offline + notifications.
@@ -58,5 +59,8 @@
   await Reminders.init();
   Reminders.tick();
   GSync.sync('boot');
+  const logOpen = () => { if (S.lastOpenLog !== today()) { S.lastOpenLog = today(); T.log('app_open', {}); save({ noSchedule: true }); } };
+  logOpen(); Cloud.sync('boot');
+  setInterval(() => { if (!document.hidden) Cloud.sync('timer'); }, 15 * 60e3);
   setInterval(() => { if (!document.hidden) GSync.sync('timer'); }, 10 * 60e3);
 })();

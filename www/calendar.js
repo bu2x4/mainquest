@@ -96,6 +96,7 @@ const Cal = {
           if (!f.title) return UI.toast('Give it a name');
           f.emoji = autoEmoji(f.title) === '⭐' ? '📅' : autoEmoji(f.title);
           const invited = f.attendees.length && (!e || f.attendees.some(a => !(e.attendees || []).includes(a)));
+          if (invited) T.log('invite_sent', { n: f.attendees.length });
           if (isNew) S.events.push({ id: uid(), ...f, gdirty: true }); else Object.assign(S.events.find(x => x.id === e.id), f, { gdirty: true });
           this.sel = f.date; save(); if (typeof GSync !== 'undefined') GSync.soon(); UI.closeSheet(); UI.render(); UI.toast(invited && GSync.canInvite() ? 'Saved — invites go out when Google syncs' : isNew ? 'Event added' : 'Saved');
         }
