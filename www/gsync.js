@@ -192,6 +192,7 @@ const GSync = {
       <div class="row"><div class="grow"><b>Status</b><div class="faint">${esc(status)}</div></div><span class="pill ${g.on && g.connected && !g.lastError ? 'gold' : ''}">${g.on && g.connected ? 'ON' : 'OFF'}</span></div>
       ${!g.connected ? `<p class="sub" style="margin:10px 0">Uses the Google account already on this phone (Settings → Accounts). Make sure “Calendar” sync is on for that account.</p><button class="btn primary block" data-x="gconnect">Connect phone calendars</button>` : `
       <div class="list-btn" data-x="gon" style="margin-top:10px">Sync ${g.on ? 'on' : 'off'}<span class="switch ${g.on ? 'on' : ''}" style="margin-left:auto"></span></div>
+      ${!g.readIds.length && !g.writeId ? `<p class="sub" style="margin:10px 0 0">Nothing is synced until you pick calendars below.</p>` : ''}
       <label class="lbl">Show these calendars in MainQuest</label>
       ${Object.keys(byAcct).length ? Object.entries(byAcct).map(([acct, list]) => `<div class="faint" style="margin:8px 2px 4px">${esc(acct)}</div>${list.map(c => `<button class="list-btn ${g.readIds.includes(c.id) ? 'on' : ''}" data-x="gread" data-k="${c.id}"><span class="check ${g.readIds.includes(c.id) ? 'on' : ''}" style="width:28px;height:28px;font-size:14px">${g.readIds.includes(c.id) ? '✓' : ''}</span><i class="swatch" style="background:${c.color}"></i><span class="grow">${esc(c.name)}</span>${c.primary ? '<span class="pill">primary</span>' : ''}</button>`).join('')}`).join('') : `<p class="faint">No calendars found on this phone. Add a Google account in Android Settings → Accounts, then tap Refresh.</p>`}
       <label class="lbl">Save MainQuest items to</label>
@@ -218,7 +219,7 @@ const GSync = {
   },
   async adminClick(x, b, root) {
     const g = this.cfg();
-    if (x === 'gconnect') { if (await this.connect()) { g.connected = true; g.on = true; const prim = (g.cals || []).find(c => c.primary && c.writable && c.accountType !== 'LOCAL') || (g.cals || []).find(c => c.writable); if (prim) { g.writeId = prim.id; if (!g.readIds.includes(prim.id)) g.readIds.push(prim.id); } save({ noSchedule: true }); await this.sync('connect'); } return true; }
+    if (x === 'gconnect') { if (await this.connect()) { g.connected = true; g.on = true; g.readIds = []; g.writeId = ''; save({ noSchedule: true }); UI.toast('Connected. Now pick which calendars to show and where to save.'); } return true; }
     if (x === 'gon') { g.on = !g.on; save({ noSchedule: true }); if (g.on) await this.sync('manual'); return true; }
     if (x === 'gread') { const k = b.dataset.k; g.readIds = g.readIds.includes(k) ? g.readIds.filter(i => i !== k) : [...g.readIds, k]; save({ noSchedule: true }); this.soon(); return true; }
     if (x === 'gwrite') { g.writeId = b.dataset.k; if (!g.readIds.includes(g.writeId)) g.readIds.push(g.writeId); save({ noSchedule: true }); this.soon(); return true; }
@@ -228,7 +229,7 @@ const GSync = {
     if (x === 'gcdel') { g.contacts.splice(+b.dataset.i, 1); save({ noSchedule: true }); return true; }
     if (x === 'gsync') { UI.toast('Syncing…'); const ok = await this.sync('manual'); UI.toast(ok ? 'Synced ✓' : 'Sync problem: ' + (g.lastError || 'unknown')); return true; }
     if (x === 'grefresh') { await this.refreshCalendars(); save({ noSchedule: true }); return true; }
-    if (x === 'gtest') { try { const r = await this.plugin().createTestCalendar(); await this.refreshCalendars(); if (!g.readIds.includes(String(r.calendarId))) g.readIds.push(String(r.calendarId)); save({ noSchedule: true }); await this.sync('manual'); UI.toast('Test calendar created with a sample invite'); } catch (e) { UI.toast(e.message || 'Couldn’t create test calendar'); } return true; }
+    if (x === 'gtest') { try { const r = await this.plugin().createTestCalendar(); await this.refreshCalendars(); if (!g.readIds.includes(String(r.calendarId))) g.readIds.push(String(r.calendarId)); if (!g.writeId) g.writeId = String(r.calendarId); save({ noSchedule: true }); await this.sync('manual'); UI.toast('Test calendar created with a sample invite'); } catch (e) { UI.toast(e.message || 'Couldn’t create test calendar'); } return true; }
     if (x === 'gdisconnect') { if (await ask('Stop syncing with Google Calendar? Events already synced stay in Google.', { ok: 'Disconnect' })) { Object.assign(g, { on: false, connected: false }); S.gevents = []; save(); } return true; }
     return false;
   },
