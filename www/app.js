@@ -49,7 +49,7 @@
       if (!$('#sheet-wrap').hidden) return UI.closeSheet();
       if (S.focus && Focus.panel && Focus.panel !== 'complete') { Focus.panel = null; return Focus.render(); }
       if (S.focus) return UI.toast('Tap ✕ to leave focus mode');
-      if (UI.tab !== 'now') return UI.go('now');
+      if (UI.tab !== 'home') return UI.go('home');
       App.minimizeApp();
     });
     App && App.addListener('appStateChange', ({ isActive }) => { if (isActive) { UI.render(); Reminders.sync(); } });

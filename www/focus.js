@@ -95,6 +95,7 @@ const Focus = {
     const end = Math.min(f.pausedAt || Date.now(), f.endAt);
     const min = Math.max(0, (end - f.startAt) / 60e3);
     t.focusMin = (t.focusMin || 0) + min; S.stats.focusMin += min;
+    S.stats.focusByDay[today()] = (S.stats.focusByDay[today()] || 0) + min; track('focusmin', min);
     S.stats.sessions.push({ at: f.startAt, planned: f.planned, actual: Math.round(min * 10) / 10, hour: new Date(f.startAt).getHours(), drifts: f.drifts, completed: end >= f.endAt - 1000 });
     if (S.stats.sessions.length > 300) S.stats.sessions = S.stats.sessions.slice(-300);
     f.startAt = Date.now(); // prevents double-banking
@@ -110,6 +111,7 @@ const Focus = {
     const steps = t.steps || [];
     const cur = steps[f.stepIdx] && !steps[f.stepIdx].done ? steps[f.stepIdx] : steps.find(s => !s.done);
     const isBreak = f.mode === 'break' || f.mode === 'move';
+    const deck = t.assignmentId && S.papers.find(p => p.study && (p.assignmentId === t.assignmentId || ((S.assignments.find(a => a.id === t.assignmentId) || {}).paperIds || []).includes(p.id)) && (p.study.flashcards || []).length);
     const label = f.mode === 'move' ? 'Move first!' : f.mode === 'break' ? 'Break time' : f.mode === 'mini' ? 'Mini-sprint' : 'Focus sprint';
 
     if (this.panel) { ov.innerHTML = this.panelHTML(t, cur); this.bindPanel(ov, t); return; }
@@ -130,7 +132,7 @@ const Focus = {
         </svg>
       </div>
       <div class="center"><div class="timer-min" id="tmin"></div><div class="timer-lbl" id="tlbl"></div></div>
-      ${S.profile.style.helpers.includes('someone') || S.profile.style.reward === 'buddy' ? `<div class="row focus-buddy" style="justify-content:center;margin-top:8px"><span class="buddy-mini">${buddyEmoji()}</span><span class="faint">${esc(S.profile.buddyName)} is working with you</span></div>` : ''}
+      ${deck ? `<div class="row" style="justify-content:center;margin-top:8px;gap:8px"><button class="btn small" data-f="deck">🃏 Open flashcards</button>${(deck.study.quiz || []).length ? `<button class="btn small" data-f="dquiz">❓ Practice quiz</button>` : ''}</div>` : S.profile.style.helpers.includes('someone') ? `<div class="row focus-buddy" style="justify-content:center;margin-top:8px"><span class="faint">Tip: work near someone — it helps you lock in.</span></div>` : ''}
       <div class="focus-actions">
         ${isBreak ? `<button class="btn primary big" data-f="back">🎯 Back to mission</button>` : `
           ${cur ? `<button class="btn primary big" data-f="step">✅ Step done</button>` : `<button class="btn primary big" data-f="finish">🏁 I finished the mission!</button>`}
@@ -186,6 +188,7 @@ const Focus = {
       UI.toast('Mission saved. Come back anytime 👋');
     }
     if (a === 'park') UI.parkSheet();
+    if (a === 'deck' || a === 'dquiz') { const deck = S.papers.find(p => p.study && (p.assignmentId === t.assignmentId || ((S.assignments.find(x => x.id === t.assignmentId) || {}).paperIds || []).includes(p.id))); if (deck) (a === 'deck' ? School.flashcards(deck) : School.quiz(deck)); }
     if (a === 'pause') { if (f.pausedAt) { const d = Date.now() - f.pausedAt; f.endAt += d; if (f.nextCheck) f.nextCheck += d; f.pausedAt = 0; Reminders.focusNotify(FOCUS_END_ID, new Date(f.endAt), '⏰ Sprint done!', `Nice work on ${t.title}.`); } else { f.pausedAt = Date.now(); Reminders.focusCancel(FOCUS_END_ID); } save({ noSchedule: true }); this.render(); }
     if (a === 'more') { f.endAt += 5 * 60e3; f.extra = (f.extra || 0) + 5 * 60e3; Reminders.focusNotify(FOCUS_END_ID, new Date(f.endAt), '⏰ Sprint done!', `Nice work on ${t.title}.`); UI.toast('+5 minutes'); this.tick(); }
     if (a === 'step') {
@@ -220,7 +223,6 @@ const Focus = {
 
   /* ---------- Panels */
   panelHTML(t, cur) {
-    const name = esc(S.profile.buddyName);
     const step = cur ? esc(cur.text) : (t.steps || []).length ? 'Finish it up!' : 'Do the very first tiny part';
     switch (this.panel) {
       case 'checkin': return `
@@ -232,9 +234,9 @@ const Focus = {
           <button class="btn big" data-p="drift">🌀 I drifted</button>
         </div>`;
       case 'welcome': return `
-        <div class="big-emoji">${buddyEmoji()}</div>
+        <div class="center">${emblemSVG(S.player.emblem, S.player.color, 64)}</div>
         <h1 class="center">Welcome back!</h1>
-        <p class="center sub">${esc(pick(BUDDY_LINES.drift))}</p>
+        <p class="center sub">${esc(pick(LINES.drift))}</p>
         <div class="card center"><div class="faint">Your mission</div><div style="font-size:22px;font-weight:800">${esc(t.emoji)} ${esc(t.title)}</div>
           <div class="sub" style="margin-top:6px">Tiny next step: <b>${step}</b></div></div>
         <div class="focus-actions">
@@ -243,8 +245,8 @@ const Focus = {
         </div>`;
       case 'refocus': return `
         <div class="breathe">breathe</div>
-        <h1 class="center">You noticed. That’s the skill. 🧠</h1>
-        <p class="center sub">${esc(pick(BUDDY_LINES.drift))}</p>
+        <h1 class="center">You noticed. That’s the skill.</h1>
+        <p class="center sub">${esc(pick(LINES.drift))}</p>
         <div class="card center"><div class="faint">Your mission</div><div style="font-size:22px;font-weight:800">${esc(t.emoji)} ${esc(t.title)}</div>
           <div class="sub" style="margin-top:6px">Tiny next step: <b>${step}</b></div></div>
         <div class="focus-actions">
@@ -254,8 +256,8 @@ const Focus = {
         </div>`;
       case 'stuck': return `
         <div class="big-emoji">🧩</div>
-        <h1 class="center">Stuck? Totally normal.</h1>
-        <p class="center sub">Pick one way to get unstuck:</p>
+        <h1 class="center">Stuck? Normal. Pick a way out.</h1>
+        
         <div class="focus-actions" style="margin-top:12px">
           <button class="list-btn" data-p="smaller"><span class="em">🔪</span>Chop it into tiny steps<span class="chev">›</span></button>
           <button class="list-btn" data-p="two"><span class="em">⏱️</span>Just do 2 minutes<span class="chev">›</span></button>
@@ -266,7 +268,7 @@ const Focus = {
         </div>`;
       case 'sprintEnd': return `
         <div class="big-emoji pop">⏰</div>
-        <h1 class="center">Sprint done! +${XP.sprint} XP</h1>
+        <h1 class="center">Sprint done. +${XP.sprint} XP</h1>
         <p class="center sub">You stuck with <b>${esc(t.title)}</b>. What now?</p>
         <div class="focus-actions">
           <button class="btn primary big" data-p="finish">🏁 Mission finished!</button>
@@ -277,17 +279,18 @@ const Focus = {
         const r = this.celebrate || { total: 0, parts: [] };
         const nxt = todayQueue().find(x => x.id !== t.id);
         return `
-        <div class="big-emoji pop">${buddyEmoji()}</div>
-        <h1 class="center">${esc(pick(BUDDY_LINES.done))}</h1>
-        <p class="center" style="font-size:22px;font-weight:800;color:var(--accent2)">+${r.total} XP</p>
+        <div class="center pop">${emblemSVG(S.player.emblem, S.player.color, 72)}</div>
+        <h1 class="center">${esc(pick(LINES.done))}</h1>
+        <p class="center xp-big">+${r.total} XP</p>
         <p class="center faint">${r.parts.map(esc).join(' · ')}</p>
         ${r.estimateMsg ? `<div class="card soft center">${esc(r.estimateMsg)}</div>` : ''}
-        ${r.chest ? `<div class="card center pop" style="border:2px solid var(--accent2)"><div style="font-size:40px">🎁</div><b>Surprise chest!</b><div>${esc(r.chest.text)}</div></div>` : ''}
+        ${r.bossMsg ? `<div class="card center" style="border-color:var(--accent)"><b>⚔️ ${esc(r.bossMsg)}</b></div>` : ''}
+        ${r.drop ? `<div class="card center pop loot"><b>Loot drop</b><div>${esc(r.drop.text)}</div></div>` : ''}
         <div class="focus-actions">
           ${nxt ? `<div class="card soft"><div class="faint">Next up</div><b>${esc(nxt.emoji)} ${esc(nxt.title)}</b></div>
             <button class="btn primary big" data-p="next" data-id="${nxt.id}">▶ Start next</button>
             <button class="btn" data-p="breaknext">🧃 Short break first</button>` : ''}
-          <button class="btn ${nxt ? 'ghost' : 'primary big'}" data-p="close">${nxt ? 'Done for now' : '🎉 All done — go have fun!'}</button>
+          <button class="btn ${nxt ? 'ghost' : 'primary big'}" data-p="close">${nxt ? 'Done for now' : 'All clear — you’re free'}</button>
         </div>`;
       }
     }
@@ -299,9 +302,9 @@ const Focus = {
       const b = e.target.closest('[data-p]'); if (!b) return;
       const p = b.dataset.p; const f = S.focus;
       Sfx.play('tap');
-      if (p === 'yes') { award(XP.checkin); this.panel = null; UI.toast('👍 Locked in! +1'); save({ noSchedule: true }); this.render(); }
+      if (p === 'yes') { award(XP.checkin); this.panel = null; UI.toast('Locked in. +1'); save({ noSchedule: true }); this.render(); }
       if (p === 'drift') { award(XP.checkin); f.drifts++; this.panel = 'refocus'; save({ noSchedule: true }); this.render(); }
-      if (p === 'resume') { this.panel = null; if (f.mode === 'break') { this.start(t.id, f.planned); return; } this.render(); }
+      if (p === 'resume') { if (this.panel === 'welcome' || this.panel === 'refocus') S.stats.comebacks++; this.panel = null; if (f.mode === 'break') { this.start(t.id, f.planned); return; } this.render(); }
       if (p === 'mini') { this.bankMinutes(); this.start(t.id, 5, 'mini'); }
       if (p === 'park') UI.parkSheet(() => { this.panel = null; this.render(); });
       if (p === 'stuck') { this.panel = 'stuck'; this.render(); }
@@ -313,7 +316,7 @@ const Focus = {
       }
       if (p === 'two') { this.bankMinutes(); this.start(t.id, 2, 'mini'); UI.toast('Just 2 minutes. You can stop after — or keep going.'); }
       if (p === 'move') { this.bankMinutes(); f.planned = f.planned || 5; this.start(t.id, f.planned, 'move'); }
-      if (p === 'help') { S.parking.unshift({ id: uid(), text: `🙋 Need help with: ${t.title}`, at: Date.now() }); save({ noSchedule: true }); this.panel = null; UI.toast('Added to your Parking Lot. Go ask a grown-up — that’s a pro move!'); this.render(); }
+      if (p === 'help') { S.parking.unshift({ id: uid(), text: `🙋 Need help with: ${t.title}`, at: Date.now() }); save({ noSchedule: true }); this.panel = null; UI.toast('Saved to your parking lot. Asking for help is a pro move.'); this.render(); }
       if (p === 'swap') {
         const easier = todayQueue().filter(x => x.id !== t.id).sort((a, b) => ({ tiny: 0, small: 1, big: 2, boss: 3 }[a.size] - { tiny: 0, small: 1, big: 2, boss: 3 }[b.size]))[0];
         this.bankMinutes();

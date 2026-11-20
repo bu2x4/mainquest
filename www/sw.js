@@ -1,6 +1,7 @@
 /* MainQuest service worker: offline app shell + notification actions. */
-const CACHE = 'mainquest-v1';
-const SHELL = ['./', 'index.html', 'app.css', 'content.js', 'core.js', 'focus.js', 'ui.js', 'app.js', 'manifest.webmanifest',
+const CACHE = 'mainquest-v2';
+const SHELL = ['./', 'index.html', 'app.css', 'teks.js', 'content.js', 'core.js', 'focus.js', 'school.js', 'calendar.js', 'ui.js', 'app.js', 'manifest.webmanifest',
+  'fonts/chakra-petch-latin-600-normal.woff2', 'fonts/chakra-petch-latin-700-normal.woff2', 'fonts/lexend-latin-400-normal.woff2', 'fonts/lexend-latin-500-normal.woff2', 'fonts/lexend-latin-700-normal.woff2',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/badge-96.png'];
 
 self.addEventListener('install', e => {
@@ -11,7 +12,7 @@ self.addEventListener('activate', e => {
 });
 // Network first (so updates arrive), cache fallback (so it works offline).
 self.addEventListener('fetch', e => {
-  if (e.request.method !== 'GET') return;
+  if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) return;
   e.respondWith(fetch(e.request).then(res => {
     const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return res;
   }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match('index.html'))));

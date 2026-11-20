@@ -1,6 +1,31 @@
-# MainQuest — one mission at a time
+# MainQuest — your planner, built like a game
 
-An Android app built for a 5th grader with ADHD. It tracks missions (to-dos), reminds him at the right moments, pulls him back when he drifts, and helps him build organization and time skills step by step. All data stays on the phone. There are no accounts, no ads, and no tracking.
+An Android app for a 10–15 year old with ADHD. It tracks missions (to-dos), school assignments, tests, and projects. It plans study time on a monthly calendar and reminds him what's due. It turns photos of school papers into TEKS-aligned study material, and it pulls him back when he drifts. Everything stays on the phone, except paper photos he chooses to send to Study AI. There are no accounts, no ads, and no tracking.
+
+## What's new in v2
+- **Calendar (monthly view):** shows school due dates, study sessions, personal events (practice, appointments), and to-dos. Tap a day to see it or add something.
+- **School tab**
+  - **Due:** everything open, grouped Today / Tomorrow / This week. Reminders go out the afternoon before ("Due tomorrow") and the morning of ("Turn in today").
+  - **Papers:** photograph each paper from school. **Study AI** reads it and builds a short summary, key terms, TEKS tags, 8–15 flashcards, a practice quiz, and study steps. If it spots a due date, it offers to put it on the calendar. It never answers the actual homework. It teaches the ideas and writes *similar* practice problems.
+  - **Study:** flashcard decks with light spaced repetition, plus practice quizzes with explanations.
+- **Study planning:** add a test or project and MainQuest spaces study sessions before the due date. A test gets sessions 6, 4, 2 and 1 days out; a project gets milestones spread across the available days. Sessions land on the calendar at your "after school / after snack / after dinner" times.
+- **Boss battles:** every test and project is a boss with an HP bar. Each study session, flashcard round, and practice quiz does damage.
+- **Teen redesign** (based on research into what 10–15 year olds find motivating versus "cringe"):
+  - **Look:** dark HUD style with bundled game fonts.
+  - **Identity:** gamertag, emblem, banner, and title.
+  - **Ranks:** Recruit → Legend. Ranks only go up.
+  - **Seasons:** a free track of about 6 weeks. Earned rewards never expire.
+  - **Weekly challenges:** he picks 3 of 5.
+  - **Extras:** 16 achievements and loot drops.
+  - **Gone:** the cute pet, baby talk, and anything that punishes missed days.
+- **TEKS index:** 224 current Texas standards (grades 5–8: math 2012, science 2021, ELA 2017, social studies 2022) are bundled in `www/teks.js` and used to tag study material.
+
+## Turning on Study AI (for paper scanning)
+1. Create an API key at **console.anthropic.com** → API keys (add a few dollars of credit).
+2. On his phone: Profile → Grown-up zone → **Study AI**. Paste the key, tap **Test connection**, then **Save key**.
+3. Pick **Sonnet 5.5** (best reading of handwriting and diagrams) or **Haiku 5.5** (cheaper). A paper typically costs a few cents.
+
+Photos are sent to Anthropic only when he taps "Build study pack." The key is stored only on that phone. Without a key he can still scan papers, make his own flashcards, and tag TEKS by hand.
 
 ---
 

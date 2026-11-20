@@ -27,44 +27,51 @@ function weekStart(d = new Date()) { const x = new Date(d); x.setHours(0, 0, 0, 
 const KEY = 'mainquest.v1';
 function freshState() {
   return {
-    v: 1,
+    v: 2,
     created: Date.now(),
-    profile: { name: '', buddy: 'dragon', buddyName: 'Sparky', theme: 'mint', onboarded: false,
-      style: { peak: 'unsure', sprint: 10, helpers: [], start: 'easy', reward: 'buddy', voice: 'chill' } },
-    tasks: [],
+    profile: { onboarded: false, style: { peak: 'unsure', sprint: 10, helpers: [], start: 'easy', reward: 'levels', voice: 'chill' } },
+    player: { tag: '', grade: 5, emblem: 'bolt', color: '#7dff8a', banner: 'night', title: 'newcomer', theme: 'volt' },
+    tasks: [], assignments: [], events: [], papers: [],
     routines: DEFAULT_ROUTINES(),
     parking: [],
-    stats: { xp: 0, coins: 0, missions: 0, focusMin: 0, sessions: [], estimates: [], days: {}, chests: 0, bestWeek: 0 },
-    stickers: [],
-    unlockedThemes: ['mint'],
-    rewards: DEFAULT_REWARDS(),
-    rewardsUpdated: Date.now(),
-    redemptions: [],
-    wishes: [],
-    notes: [],            // praise notes from parent
+    stats: { xp: 0, coins: 0, missions: 0, focusMin: 0, sessions: [], estimates: [], days: {}, focusByDay: {}, scanDays: {}, cardsMastered: 0,
+      comebacks: 0, loadout: 0, quizzes: 0, bossesDown: 0, lastActive: Date.now(), bestWeek: 0 },
+    season: { id: -1, xp: 0, claimed: [] },
+    weekly: { week: '', offered: [], picked: [], progress: {}, done: [] },
+    achievements: {},
+    boosts: 0,
+    unlocked: { themes: ['volt'], banners: ['night'], titles: ['newcomer'], colors: ['#7dff8a', '#3de2ff', '#ffb84d', '#a98bff', '#ff5cc8', '#ffd84a'] },
+    rewards: DEFAULT_REWARDS(), rewardsUpdated: Date.now(), redemptions: [], wishes: [], notes: [],
     tips: { seen: {}, liked: [], hidden: [], day: '', current: '' },
     settings: { bedtime: '21:00', schoolQuiet: true, schoolStart: '07:55', schoolEnd: '15:10', checkins: 'gentle',
       sound: true, haptics: true, calm: false, light: false, bigtext: false, dyslexic: false, weekGoal: 4, pin: '',
-      anchors: { afterschool: '15:45', aftersnack: '16:15', afterdinner: '18:45' } },
-    focus: null,
-    fired: {},
+      anchors: { afterschool: '15:45', aftersnack: '16:15', afterdinner: '18:45' },
+      ai: { key: '', model: 'claude-sonnet-5-5', on: false }, parentSeen: 0 },
+    focus: null, fired: {},
   };
 }
 let S = load();
 function load() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw) return migrate(JSON.parse(raw));
-  } catch (e) { console.warn('load failed', e); }
+  try { const raw = localStorage.getItem(KEY); if (raw) return migrate(JSON.parse(raw)); } catch (e) { console.warn('load failed', e); }
   return freshState();
 }
 function migrate(s) {
   const f = freshState();
   const out = { ...f, ...s };
-  out.profile = { ...f.profile, ...s.profile, style: { ...f.profile.style, ...(s.profile || {}).style } };
+  out.profile = { ...f.profile, ...s.profile, style: { ...f.profile.style, ...((s.profile || {}).style) } };
+  out.player = { ...f.player, ...s.player };
+  if (!s.player && s.profile && s.profile.name) out.player.tag = s.profile.name;
   out.stats = { ...f.stats, ...s.stats };
-  out.settings = { ...f.settings, ...s.settings, anchors: { ...f.settings.anchors, ...((s.settings || {}).anchors) } };
+  out.settings = { ...f.settings, ...s.settings, anchors: { ...f.settings.anchors, ...((s.settings || {}).anchors) }, ai: { ...f.settings.ai, ...((s.settings || {}).ai) } };
+  out.unlocked = { ...f.unlocked, ...s.unlocked };
   out.tips = { ...f.tips, ...s.tips };
+  out.season = { ...f.season, ...s.season }; out.weekly = { ...f.weekly, ...s.weekly };
+  if (!(s.v >= 2)) {
+    // v1 → v2: add "scan papers" to after-school routine if missing
+    const r = out.routines.find(x => x.id === 'r-after');
+    if (r && !r.items.some(i => i.action === 'scan')) r.items.splice(1, 0, { id: 'r-after-scan', emoji: '📸', text: 'Scan today’s papers', action: 'scan' });
+    out.v = 2;
+  }
   return out;
 }
 let saveTimer = null;
@@ -75,6 +82,23 @@ function save(opts = {}) {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => Reminders.sync(), 1200);
 }
+
+/* ------------------------------------------------------------------ Photo storage (IndexedDB — photos are too big for localStorage) */
+const IDB = {
+  db: null,
+  open() {
+    if (this.db) return Promise.resolve(this.db);
+    return new Promise((res, rej) => {
+      const r = indexedDB.open('mainquest', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('images');
+      r.onsuccess = () => { this.db = r.result; res(this.db); };
+      r.onerror = () => rej(r.error);
+    });
+  },
+  async put(id, dataUrl) { const db = await this.open(); return new Promise((res, rej) => { const tx = db.transaction('images', 'readwrite'); tx.objectStore('images').put(dataUrl, id); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); },
+  async get(id) { const db = await this.open(); return new Promise(res => { const q = db.transaction('images').objectStore('images').get(id); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); },
+  async del(id) { const db = await this.open(); return new Promise(res => { const tx = db.transaction('images', 'readwrite'); tx.objectStore('images').delete(id); tx.oncomplete = res; tx.onerror = res; }); },
+};
 
 /* ------------------------------------------------------------------ Native bridge (Capacitor) */
 const Native = {
@@ -148,146 +172,267 @@ function confetti(power = 1) {
   })(t0);
 }
 
-/* ------------------------------------------------------------------ Progress engine */
-const XP = { step: 2, tiny: 5, small: 10, big: 20, boss: 35, sprint: 5, checkin: 1, routineItem: 1, routineAll: 5, estimate: 3, warmup: 3, park: 0 };
-function levelFor(xp) { let lvl = 1, need = 25; while (xp >= need) { lvl++; need += 25 * lvl; } return lvl; }
-function levelBounds(lvl) { let lo = 0, need = 25, l = 1; while (l < lvl) { lo = need; l++; need += 25 * l; } return [lo, need]; }
-function buddyStage(lvl = levelFor(S.stats.xp)) { let s = 0; STAGE_LEVELS.forEach((L, i) => { if (lvl >= L) s = i; }); return s; }
-function buddyEmoji() { const b = BUDDIES[S.profile.buddy] || BUDDIES.dragon; return b.stages[buddyStage()]; }
+/* ------------------------------------------------------------------ Progress engine: XP, levels, ranks (only go up) */
+const XP = { step: 2, tiny: 5, small: 10, big: 20, boss: 35, sprint: 5, checkin: 1, routineItem: 1, routineAll: 5, estimate: 3, warmup: 3,
+  study: 15, card: 1, quiz: 10, scan: 5, challenge: 25, bossDown: 50, achievement: 20 };
+function stepXP(l) { return 50 + 15 * l; }
+function levelFor(xp) { let l = 1, acc = 0; while (xp >= acc + stepXP(l)) { acc += stepXP(l); l++; } return l; }
+function levelBounds(l) { let acc = 0; for (let i = 1; i < l; i++) acc += stepXP(i); return [acc, acc + stepXP(l)]; }
 function markGoodDay() { S.stats.days[today()] = (S.stats.days[today()] || 0) + 1; }
-function goodDaysThisWeek() {
-  const ws = weekStart(); let n = 0;
-  for (let i = 0; i < 7; i++) if (S.stats.days[dayKey(addDays(ws, i))]) n++;
-  return n;
-}
+function goodDaysThisWeek() { const ws = weekStart(); let n = 0; for (let i = 0; i < 7; i++) if (S.stats.days[dayKey(addDays(ws, i))]) n++; return n; }
 function totalGoodDays() { return Object.keys(S.stats.days).length; }
 
-/* award() is the single door for XP so level-ups and unlocks always fire. */
+/* Seasons: ~6-week blocks from Aug 3 2026. Earned unlocks never expire. */
+const SEASON_EPOCH = new Date('2026-08-03T00:00:00');
+function seasonNow() { return Math.floor((Date.now() - SEASON_EPOCH) / (SEASON_DAYS * 864e5)) + 1; }
+function seasonEnds() { return new Date(+SEASON_EPOCH + seasonNow() * SEASON_DAYS * 864e5); }
+function ensureSeason() { const n = seasonNow(); if (S.season.id !== n) S.season = { id: n, xp: 0, claimed: [] }; }
+function seasonTier() { return Math.min(SEASON_TRACK.length - 1, Math.floor(S.season.xp / SEASON_TIER_XP)); }
+
 function award(amount, reason) {
-  if (!amount) return;
-  const before = levelFor(S.stats.xp), stageBefore = buddyStage(before);
-  S.stats.xp += amount; S.stats.coins += amount;
+  if (!amount) return 0;
+  ensureSeason();
+  const before = levelFor(S.stats.xp), rankBefore = rankFor(before);
+  S.stats.xp += amount; S.stats.coins += amount; S.season.xp += amount;
   const after = levelFor(S.stats.xp);
   const gw = goodDaysThisWeek(); if (gw > S.stats.bestWeek) S.stats.bestWeek = gw;
   if (after > before) {
-    const newThemes = THEMES.filter(t => t.level <= after && !S.unlockedThemes.includes(t.id));
-    newThemes.forEach(t => S.unlockedThemes.push(t.id));
-    const evolved = buddyStage(after) > stageBefore;
-    setTimeout(() => UI.levelUp(after, evolved, newThemes), 900);
+    const fresh = [];
+    THEMES.filter(t => t.level && t.level <= after && !S.unlocked.themes.includes(t.id)).forEach(t => { S.unlocked.themes.push(t.id); fresh.push(`Theme: ${t.name}`); });
+    BANNERS.filter(b => b.level && b.level <= after && !S.unlocked.banners.includes(b.id)).forEach(b => { S.unlocked.banners.push(b.id); fresh.push(`Banner: ${b.name}`); });
+    const rankAfter = rankFor(after);
+    setTimeout(() => UI.levelUp(after, rankAfter.name !== rankBefore.name || rankAfter.div !== rankBefore.div, fresh), 900);
   }
   return amount;
 }
 
-/* Surprise chest — variable reward that thins out gradually (every mission early on, then rarer). */
-function chestChance() {
-  const m = S.stats.missions;
-  if (m <= 3) return 1;          // first days: fast, guaranteed delight
-  if (m <= 10) return 0.5;
-  if (m <= 25) return 0.33;
-  return 0.22;
-}
-function rollChest() {
-  if (Math.random() > chestChance()) return null;
-  S.stats.chests++;
-  const lockedStickers = STICKERS.filter(s => !S.stickers.includes(s));
-  const r = Math.random();
-  if (r < 0.5 && lockedStickers.length) { const s = pick(lockedStickers); S.stickers.push(s); return { kind: 'sticker', s, text: `New sticker: ${s}` }; }
-  if (r < 0.62) {
-    const lockedTheme = THEMES.find(t => !S.unlockedThemes.includes(t.id));
-    if (lockedTheme) { S.unlockedThemes.push(lockedTheme.id); return { kind: 'theme', text: `Secret theme unlocked: ${lockedTheme.name}!` }; }
-  }
-  const coins = pick([5, 5, 8, 10, 10, 15, 20, 25]); S.stats.coins += coins;
-  return { kind: 'coins', text: `+${coins} bonus coins 🪙` };
+/* Season track rewards are claimed by tapping (feels like loot, nothing expires). */
+function claimSeasonTier(i) {
+  if (i > seasonTier() || S.season.claimed.includes(i) || !SEASON_TRACK[i]) return null;
+  const r = SEASON_TRACK[i]; S.season.claimed.push(i); let text = '';
+  if (r.banner && !S.unlocked.banners.includes(r.banner)) { S.unlocked.banners.push(r.banner); text = 'Banner: ' + BANNERS.find(b => b.id === r.banner).name; }
+  if (r.theme && !S.unlocked.themes.includes(r.theme)) { S.unlocked.themes.push(r.theme); text = 'Theme: ' + THEMES.find(t => t.id === r.theme).name; }
+  if (r.color && !S.unlocked.colors.includes(r.color)) { S.unlocked.colors.push(r.color); text = 'New emblem color'; }
+  if (r.title && !S.unlocked.titles.includes(r.title)) { S.unlocked.titles.push(r.title); text = 'Title: ' + TITLES.find(t => t.id === r.title).name; }
+  if (r.boost) { S.boosts += r.boost; text = `${r.boost}× Double-XP boost`; }
+  save({ noSchedule: true });
+  return text || 'Already unlocked — +25 coins';
 }
 
-/* ------------------------------------------------------------------ Tasks helpers */
+/* Weekly challenges: 5 offered, he picks 3. */
+function weekId() { return dayKey(weekStart()); }
+function ensureWeekly() {
+  if (S.weekly.week === weekId()) return;
+  const pool = CHALLENGE_POOL.slice().sort(() => Math.random() - .5).slice(0, 5).map(c => c.id);
+  S.weekly = { week: weekId(), offered: pool, picked: [], progress: {}, done: [] };
+}
+function track(ev, n = 1) {
+  ensureWeekly();
+  const w = S.weekly;
+  w.picked.forEach(id => {
+    const c = CHALLENGE_POOL.find(x => x.id === id); if (!c || c.ev !== ev || w.done.includes(id)) return;
+    w.progress[id] = (w.progress[id] || 0) + n;
+    if (w.progress[id] >= c.goal) { w.done.push(id); award(XP.challenge); S.season.xp += 75; setTimeout(() => UI.toast(`Challenge complete: ${c.name}  +100 season XP`), 600); }
+  });
+  checkAchievements();
+}
+function unlockAch(id) {
+  if (S.achievements[id]) return;
+  S.achievements[id] = Date.now(); award(XP.achievement);
+  const a = ACHIEVEMENTS.find(x => x.id === id);
+  const t = TITLES.find(x => x.ach === id); if (t && !S.unlocked.titles.includes(t.id)) S.unlocked.titles.push(t.id);
+  setTimeout(() => UI.achievement(a, t), 1200);
+}
+function checkAchievements() {
+  const st = S.stats, td = today();
+  const doneToday = S.tasks.filter(t => t.done && t.doneAt && dayKey(new Date(t.doneAt)) === td).length;
+  if (st.missions >= 1) unlockAch('first');
+  if (doneToday >= 5) unlockAch('combo');
+  if (doneToday >= 2 && !todayQueue().length) unlockAch('sweep');
+  if (st.estimates.filter(e => e.act / e.est >= .7 && e.act / e.est <= 1.3).length >= 5) unlockAch('timelord');
+  if (Object.keys(st.scanDays).length >= 5) unlockAch('papertrail');
+  if (st.cardsMastered >= 50) unlockAch('scholar');
+  if ((st.focusByDay[td] || 0) >= 60) unlockAch('lockedin');
+  if (st.comebacks >= 10) unlockAch('comeback');
+  if (st.loadout >= 5) unlockAch('loadout');
+  if (st.bossesDown >= 1) unlockAch('boss');
+  if (S.tasks.some(t => (t.focusMin || 0) >= 25)) unlockAch('deepfocus');
+}
+
+/* Loot drop — variable reward that thins out gradually. */
+function dropChance() { const m = S.stats.missions; return m <= 3 ? 1 : m <= 10 ? .5 : m <= 25 ? .33 : .22; }
+function rollDrop() {
+  if (Math.random() > dropChance()) return null;
+  const r = Math.random();
+  const lockedColor = EMBLEM_COLORS.find(c => !S.unlocked.colors.includes(c));
+  if (r < .2 && lockedColor) { S.unlocked.colors.push(lockedColor); return { text: 'New emblem color unlocked' }; }
+  if (r < .35) { S.boosts++; return { text: 'Double-XP boost (next mission)' }; }
+  const coins = pick([5, 8, 10, 10, 15, 20, 25]); S.stats.coins += coins;
+  return { text: `+${coins} coins` };
+}
+
+/* ------------------------------------------------------------------ Tasks */
 function taskDate(t) { return t.date || today(); }
 function isToday(t) { return !t.done && t.when !== 'later' && taskDate(t) <= today(); }
 function carriedDays(t) { if (t.done || t.when === 'later') return 0; const d = taskDate(t); if (d >= today()) return 0; return Math.round((new Date(today()) - new Date(d)) / 864e5); }
-function sizeXP(t) { return t.size === 'boss' ? XP.boss : XP[t.size] || XP.small; }
+function sizeXP(t) { if (t.kind === 'study') return XP.study; return t.size === 'boss' ? XP.boss : XP[t.size] || XP.small; }
 function todayQueue() {
   const list = S.tasks.filter(isToday);
   const style = S.profile.style.start;
   const weight = { tiny: 0, small: 1, big: 2, boss: 3 };
   list.sort((a, b) => {
-    if ((a.pin || 0) !== (b.pin || 0)) return (b.pin || 0) - (a.pin || 0);   // "make this next" wins
+    if ((a.pin || 0) !== (b.pin || 0)) return (b.pin || 0) - (a.pin || 0);
     const da = a.defer === today() ? a.deferAt : 0, db = b.defer === today() ? b.deferAt : 0;
-    if (da !== db) return da - db;                                              // "not now" goes to the back
+    if (da !== db) return da - db;
+    // things due soonest first
+    const dueA = a.assignmentId ? (S.assignments.find(x => x.id === a.assignmentId) || {}).due || '9' : '9';
+    const dueB = b.assignmentId ? (S.assignments.find(x => x.id === b.assignmentId) || {}).due || '9' : '9';
+    if (dueA !== dueB) return dueA < dueB ? -1 : 1;
     const ta = a.time ? atTime(a.time) : null, tb = b.time ? atTime(b.time) : null;
-    if (ta && tb) return ta - tb;
+    if (ta && tb && +ta !== +tb) return ta - tb;
     if (style === 'hard') return (weight[b.size] || 1) - (weight[a.size] || 1) || a.created - b.created;
     if (style === 'easy') return (weight[a.size] || 1) - (weight[b.size] || 1) || a.created - b.created;
     return (a.order ?? a.created) - (b.order ?? b.created);
   });
   return list;
 }
-/* Quietly park things carried over 3+ days into Later — no red backlog. */
 function tidyBacklog() {
   let moved = 0;
-  S.tasks.forEach(t => { if (carriedDays(t) >= 3) { t.when = 'later'; t.date = null; t.parkedAuto = true; moved++; } });
-  // keep done tasks for 14 days only
-  const cutoff = Date.now() - 14 * 864e5;
+  S.tasks.forEach(t => { if (!t.assignmentId && carriedDays(t) >= 3) { t.when = 'later'; t.date = null; t.parkedAuto = true; moved++; } });
+  const cutoff = Date.now() - 21 * 864e5;
   S.tasks = S.tasks.filter(t => !t.done || t.doneAt > cutoff);
   if (moved) save({ noSchedule: true });
   return moved;
 }
 function newTask(title, extra = {}) {
   const t = { id: uid(), title: title.trim(), emoji: autoEmoji(title), size: 'small', when: 'today', date: today(), time: '', anchor: '',
-    steps: [], gear: [], est: null, done: false, created: Date.now(), focusMin: 0, ...extra };
-  if (t.when === 'tomorrow') t.date = dayKey(addDays(new Date(), 1));
+    steps: [], gear: [], est: null, done: false, created: Date.now(), focusMin: 0, kind: 'todo', ...extra };
+  if (t.when === 'tomorrow') { t.when = 'today'; t.date = dayKey(addDays(new Date(), 1)); }
   if (t.when === 'later') t.date = null;
   return t;
 }
-function completeTask(t, { fromFocus = false, actualMin = null } = {}) {
+function completeTask(t, { actualMin = null } = {}) {
   if (t.done) return null;
   t.done = true; t.doneAt = Date.now(); t.pin = 0; t.defer = null;
   S.stats.missions++;
   const parts = [];
-  let total = award(sizeXP(t)); parts.push(`+${sizeXP(t)} mission`);
+  let base = sizeXP(t); let boosted = false;
+  if (S.boosts > 0) { S.boosts--; base *= 2; boosted = true; }
+  let total = award(base); parts.push(`+${base} ${t.kind === 'study' ? 'study' : 'mission'}${boosted ? ' (2×)' : ''}`);
   const firstToday = !S.tasks.some(x => x !== t && x.done && x.doneAt && dayKey(new Date(x.doneAt)) === today());
   if (firstToday) { total += award(XP.warmup); parts.push(`+${XP.warmup} first of the day`); }
   let estimateMsg = '';
   if (t.est && actualMin) {
-    S.stats.estimates.push({ est: t.est, act: actualMin, at: Date.now() });
+    S.stats.estimates.push({ est: t.est, act: actualMin, at: Date.now() }); track('guess');
     const ratio = actualMin / t.est;
-    if (ratio >= 0.7 && ratio <= 1.3) { total += award(XP.estimate); parts.push(`+${XP.estimate} Time Detective`); estimateMsg = `You guessed ${t.est} min — it took ${actualMin}. Super close! 🕵️`; }
-    else estimateMsg = `You guessed ${t.est} min — it took ${actualMin}. ${ratio > 1 ? 'Took longer than you thought — that is normal! Next time guess a bit more.' : 'Faster than you thought! 🚀'}`;
+    if (ratio >= 0.7 && ratio <= 1.3) { total += award(XP.estimate); parts.push(`+${XP.estimate} Time Detective`); estimateMsg = `Guessed ${t.est} min, took ${actualMin}. Dialed in.`; }
+    else estimateMsg = `Guessed ${t.est} min, took ${actualMin}. ${ratio > 1 ? 'Took longer than you thought — normal. Pad your next guess a bit.' : 'Faster than you thought.'}`;
   }
-  markGoodDay();
-  const chest = rollChest();
+  let bossMsg = '';
+  if (t.assignmentId) {
+    const a = S.assignments.find(x => x.id === t.assignmentId);
+    if (a) {
+      if (a.maxHp) { const r = damageBoss(a, 100); if (r) bossMsg = r; }
+      if (a.type !== 'test' && a.type !== 'quiz' && a.type !== 'project') finishAssignment(a);
+      if (a.type === 'project' && !S.tasks.some(x => x.assignmentId === a.id && !x.done)) finishAssignment(a);
+    }
+    if (t.kind === 'study') track('study');
+  }
+  markGoodDay(); track('mission');
+  const drop = rollDrop();
   save();
-  return { total, parts, chest, estimateMsg };
+  return { total, parts, drop, estimateMsg, bossMsg };
 }
 
-/* ------------------------------------------------------------------ Orientation: what's next today */
+/* ------------------------------------------------------------------ School: assignments, study planning, bosses */
+const STUDY_ROUNDS = {
+  test: [['Make or review flashcards', 'Do 10 minutes of flashcards'], ['Practice quiz', 'Review what you missed'], ['Flashcards: only the hard ones', 'Practice quiz again'], ['Final review: skim everything once', 'Pack what you need for the test']],
+  quiz: [['Flashcards for 10 minutes', 'Practice quiz'], ['Review mistakes', 'Quick final run-through']],
+};
+const PROJECT_STEPS = ['Read the requirements + make a checklist', 'Gather materials / research', 'Build part 1', 'Build part 2', 'Finish + polish', 'Final check, pack it for school'];
+function anchorTime(k) { return k === 'beforebed' ? fmt24(new Date(+atTime(S.settings.bedtime) - 75 * 60e3)) : (S.settings.anchors[k] || '16:00'); }
+function dayLoad(dk) { return S.tasks.filter(t => !t.done && t.date === dk).length + S.events.filter(e => e.date === dk && e.time).length; }
+function planAssignment(a) {
+  S.tasks = S.tasks.filter(t => !(t.assignmentId === a.id && !t.done && t.auto));
+  const due = new Date(a.due + 'T12:00:00'); const now = new Date(); now.setHours(12, 0, 0, 0);
+  const daysUntil = Math.round((due - now) / 864e5);
+  const lastDay = daysUntil >= 1 ? addDays(due, -1) : now;
+  const mk = (title, date, steps, extra = {}) => {
+    const dk = dayKey(date);
+    const load = dayLoad(dk); const slot = load >= 2 ? 'afterdinner' : load === 1 ? 'aftersnack' : 'afterschool';
+    S.tasks.push(newTask(title, { date: dk, time: a.noRemind ? '' : anchorTime(slot), anchor: slot, assignmentId: a.id, auto: true, emoji: subj(a.subject).icon,
+      steps: steps.map(text => ({ id: uid(), text, done: false })), kind: extra.kind || 'homework', size: extra.size || 'small', est: extra.est || null }));
+  };
+  let n = 0;
+  if (a.type === 'test' || a.type === 'quiz') {
+    const rounds = STUDY_ROUNDS[a.type];
+    const offsets = a.type === 'test' ? [6, 4, 2, 1] : [2, 1];
+    let days = offsets.map(o => addDays(due, -o)).filter(d => d >= now);
+    if (!days.length) days = [now];
+    const used = rounds.slice(rounds.length - days.length);
+    days.forEach((d, i) => mk(`Study ${a.title} · ${i + 1}/${days.length}`, d, used[i], { kind: 'study', est: 20 }));
+    n = days.length;
+  } else if (a.type === 'project') {
+    const avail = Math.max(1, Math.round((lastDay - now) / 864e5) + 1);
+    n = clamp(Math.round(avail / 2), 2, 6); if (avail < n) n = avail;
+    const steps = n >= PROJECT_STEPS.length ? PROJECT_STEPS : [PROJECT_STEPS[0], ...PROJECT_STEPS.slice(2, 2 + n - 2), PROJECT_STEPS[5]].slice(0, n);
+    for (let i = 0; i < n; i++) { const d = addDays(now, Math.round(i * (avail - 1) / Math.max(1, n - 1))); mk(`${a.title}: ${steps[i]}`, d, [steps[i]], { kind: 'study', size: 'big', est: 30 }); }
+  } else if (a.type === 'form') {
+    mk(`Get signed: ${a.title}`, now, ['Give it to a grown-up', 'Put it back in your folder'], { size: 'tiny' });
+  } else {
+    mk(a.title, lastDay, [], { size: a.type === 'reading' ? 'small' : 'small', kind: 'homework' });
+  }
+  if (a.type === 'test' || a.type === 'quiz' || a.type === 'project') { a.maxHp = n * 100; a.hp = a.maxHp; a.boss = a.boss || bossName(a.subject, a.id); }
+  else { a.maxHp = 0; a.hp = 0; }
+}
+function createAssignment(fields) {
+  const a = { id: uid(), title: fields.title.trim(), subject: fields.subject || 'other', type: fields.type || 'homework', due: fields.due, created: Date.now(),
+    notes: fields.notes || '', paperIds: fields.paperIds || [], status: 'open', teks: fields.teks || [] };
+  S.assignments.push(a); planAssignment(a); save();
+  return a;
+}
+function damageBoss(a, dmg) {
+  if (!a.maxHp || a.defeated) return '';
+  a.hp = Math.max(0, a.hp - dmg);
+  if (a.hp <= 0) { a.defeated = true; S.stats.bossesDown++; award(XP.bossDown); setTimeout(() => UI.toast(`Boss down: ${a.boss}. You’re ready for ${a.title}.`), 700); return `Boss down: ${a.boss}`; }
+  return `${a.boss} −${dmg} HP`;
+}
+function finishAssignment(a) {
+  if (a.status === 'done') return;
+  a.status = 'done'; a.doneAt = Date.now();
+  const left = Math.round((new Date(a.due + 'T12:00:00') - new Date(today() + 'T12:00:00')) / 864e5);
+  if (left >= 2) { unlockAch('speedrun'); track('early'); } else if (left === 0) unlockAch('clutch'); else if (left === 1) track('early');
+}
+function openAssignments() { return S.assignments.filter(a => a.status !== 'done').sort((a, b) => a.due < b.due ? -1 : 1); }
+function daysUntil(dk) { return Math.round((new Date(dk + 'T12:00:00') - new Date(today() + 'T12:00:00')) / 864e5); }
+function dueLabel(dk) { const n = daysUntil(dk); return n < 0 ? `${-n} day${n === -1 ? '' : 's'} ago` : n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : n < 7 ? new Date(dk + 'T12:00').toLocaleDateString(undefined, { weekday: 'long' }) : new Date(dk + 'T12:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
+function dueLc(dk) { const l = dueLabel(dk); return l === 'Today' || l === 'Tomorrow' ? l.toLowerCase() : l; }
+function itemsOn(dk) {
+  return {
+    events: S.events.filter(e => e.date === dk).sort((a, b) => (a.time || '99') < (b.time || '99') ? -1 : 1),
+    due: S.assignments.filter(a => a.due === dk),
+    tasks: S.tasks.filter(t => t.date === dk).sort((a, b) => (a.time || '99') < (b.time || '99') ? -1 : 1),
+  };
+}
+
+/* ------------------------------------------------------------------ Orientation */
 function upcomingEvents(from = new Date(), horizonH = 30) {
-  const ev = [];
-  const end = new Date(from.getTime() + horizonH * 3600e3);
+  const ev = []; const end = new Date(from.getTime() + horizonH * 3600e3);
   for (let dOff = 0; dOff <= 1; dOff++) {
     const base = addDays(from, dOff); const dk = dayKey(base); const wd = base.getDay();
-    S.routines.forEach(r => {
-      if (!r.days.includes(wd)) return;
-      const at = atTime(r.time, base);
-      const doneAll = (r.log[dk] || []).length >= r.items.length;
-      if (!doneAll) ev.push({ kind: 'routine', id: r.id, at, title: r.name, emoji: r.emoji });
-    });
-    S.tasks.forEach(t => {
-      if (t.done || !t.time || t.when === 'later') return;
-      const td = taskDate(t); const effective = td < today() ? today() : td;
-      if (effective !== dk) return;
-      ev.push({ kind: 'task', id: t.id, at: atTime(t.time, base), title: t.title, emoji: t.emoji });
-    });
+    S.routines.forEach(r => { if (!r.days.includes(wd)) return; if ((r.log[dk] || []).length >= r.items.length) return; ev.push({ kind: 'routine', id: r.id, at: atTime(r.time, base), title: r.name, emoji: r.emoji }); });
+    S.tasks.forEach(t => { if (t.done || !t.time || t.when === 'later') return; const td = taskDate(t); const eff = td < today() ? today() : td; if (eff !== dk) return; ev.push({ kind: 'task', id: t.id, at: atTime(t.time, base), title: t.title, emoji: t.emoji }); });
+    S.events.forEach(e => { if (e.date !== dk || !e.time) return; ev.push({ kind: 'event', id: e.id, at: atTime(e.time, base), title: e.title, emoji: e.emoji || '📅' }); });
     ev.push({ kind: 'bed', at: atTime(S.settings.bedtime, base), title: 'Bedtime', emoji: '😴' });
   }
   return ev.filter(e => e.at > from && e.at < end).sort((a, b) => a.at - b.at);
 }
 function routineActive(now = new Date()) {
-  // A routine is "active" from 10 min before its time until 90 min after, if not finished.
   const dk = today(), wd = now.getDay();
   return S.routines.find(r => {
     if (!r.days.includes(wd)) return false;
     const at = atTime(r.time); const done = (r.log[dk] || []).length;
-    return done < r.items.length && now >= new Date(at - 10 * 60e3) && now <= new Date(+at + 90 * 60e3) && !(r.skipped === dk);
+    return done < r.items.length && now >= new Date(at - 10 * 60e3) && now <= new Date(+at + 90 * 60e3) && r.skipped !== dk;
   });
 }
 function inSchoolQuiet(d) {
@@ -295,29 +440,24 @@ function inSchoolQuiet(d) {
   const wd = d.getDay(); if (wd === 0 || wd === 6) return false;
   return d >= atTime(st.schoolStart, d) && d < atTime(st.schoolEnd, d);
 }
-function inNightQuiet(d) {
-  const bed = atTime(S.settings.bedtime, d); const wake = atTime('06:30', d);
-  return d >= new Date(+bed + 30 * 60e3) || d < wake;
-}
+function inNightQuiet(d) { const bed = atTime(S.settings.bedtime, d); const wake = atTime('06:30', d); return d >= new Date(+bed + 30 * 60e3) || d < wake; }
+function fmt24(d) { return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 
-/* ------------------------------------------------------------------ Reminders
-   Native (APK): real Android notifications via @capacitor/local-notifications — fire even when the app is closed.
-   Web/PWA: in-app banners + service-worker notifications while the app is alive. */
 const Reminders = {
   ready: false,
   plan(now = new Date()) {
     const voice = S.profile.style.voice; const out = [];
-    const horizon = new Date(+now + 48 * 3600e3);
-    const push = (o) => { if (o.at > now && o.at < horizon && !inNightQuiet(o.at)) out.push(o); };
+    const horizon = new Date(+now + 72 * 3600e3);
+    const push = (o) => { if (o.at > now && o.at < horizon && !inNightQuiet(o.at) && !(o.kind === 'event' && inSchoolQuiet(o.at))) out.push(o); };
     // Missions with a time: heads-up (−5), at time, gentle follow-up (+10). Varied wording each time.
     S.tasks.forEach(t => {
       if (t.done || !t.time || t.when === 'later') return;
       const td = taskDate(t); const d = new Date((td < today() ? today() : td) + 'T00:00:00');
       const at = atTime(t.time, d);
       if (inSchoolQuiet(at)) return;
-      push({ key: `h-${t.id}-${+at}`, at: new Date(+at - 5 * 60e3), title: 'Heads up', body: voiceLine(voice, 'heads', t.title), kind: 'mission', taskId: t.id, channel: 'missions' });
+      if (!t.auto) push({ key: `h-${t.id}-${+at}`, at: new Date(+at - 5 * 60e3), title: 'Heads up', body: voiceLine(voice, 'heads', t.title), kind: 'mission', taskId: t.id, channel: 'missions' });
       push({ key: `s-${t.id}-${+at}`, at, title: `${t.emoji} ${t.title}`, body: voiceLine(voice, 'start', t.title), kind: 'mission', taskId: t.id, channel: 'missions' });
-      push({ key: `f-${t.id}-${+at}`, at: new Date(+at + 10 * 60e3), title: `${t.emoji} Still waiting`, body: voiceLine(voice, 'follow', t.title), kind: 'mission', taskId: t.id, channel: 'missions' });
+      if (!t.auto) push({ key: `f-${t.id}-${+at}`, at: new Date(+at + 10 * 60e3), title: `${t.emoji} Still waiting`, body: voiceLine(voice, 'follow', t.title), kind: 'mission', taskId: t.id, channel: 'missions' });
     });
     // Routines on their days.
     for (let dOff = 0; dOff <= 1; dOff++) {
@@ -331,10 +471,22 @@ const Reminders = {
       });
       // Transition warning before bedtime: 30 min heads-up.
       const bed = atTime(S.settings.bedtime, base);
-      push({ key: `bed-${dk}`, at: new Date(+bed - 30 * 60e3), title: '🌙 30 minutes to bedtime', body: pick(BUDDY_LINES.evening), kind: 'bed', channel: 'routines' });
+      push({ key: `bed-${dk}`, at: new Date(+bed - 30 * 60e3), title: '30 minutes to bedtime', body: pick(LINES.evening), kind: 'bed', channel: 'routines' });
     }
+    // School: due tomorrow (after school) and turn-in day (before school). Events: 30-min heads-up.
+    S.assignments.filter(a => a.status !== 'done' || a.type === 'test' || a.type === 'quiz').forEach(a => {
+      if (a.result) return;
+      const due = new Date(a.due + 'T00:00:00'); const ty = atype(a.type);
+      if (a.status !== 'done') push({ key: `d1-${a.id}`, at: atTime(S.settings.anchors.afterschool, addDays(due, -1)), title: `Due tomorrow: ${a.title}`, body: a.type === 'test' || a.type === 'quiz' ? `${ty.name} tomorrow. One more round of study and you’re set.` : 'Knock it out today so tomorrow is easy.', kind: 'assign', channel: 'school' });
+      push({ key: `d0-${a.id}`, at: atTime('07:20', due), title: a.type === 'test' || a.type === 'quiz' ? `${ty.name} today: ${a.title}` : a.type === 'form' ? `Bring it signed: ${a.title}` : `Turn in today: ${a.title}`, body: a.type === 'test' || a.type === 'quiz' ? 'You trained for this. Breathe, read every question.' : 'Check it’s in your bag.', kind: 'assign', channel: 'school' });
+    });
+    S.events.forEach(e => {
+      if (!e.time || e.noRemind) return;
+      const at = atTime(e.time, new Date(e.date + 'T00:00:00'));
+      push({ key: `ev-${e.id}`, at: new Date(+at - 30 * 60e3), title: `${e.title} in 30 min`, body: e.where ? `At ${e.where}. Time to get ready.` : 'Time to get ready.', kind: 'event', channel: 'routines' });
+    });
     out.sort((a, b) => a.at - b.at);
-    return out.slice(0, 48);
+    return out.slice(0, 60);
   },
   idFor(key) { let h = 0; for (const c of key) h = (h * 31 + c.charCodeAt(0)) | 0; return Math.abs(h) % 2000000000 + 1; },
 
@@ -344,6 +496,7 @@ const Reminders = {
       try {
         await LN.createChannel({ id: 'missions', name: 'Mission reminders', importance: 4, vibration: true, description: 'Heads-up and start reminders for missions' });
         await LN.createChannel({ id: 'routines', name: 'Routines', importance: 4, vibration: true, description: 'Morning, after-school and bedtime routines' });
+        await LN.createChannel({ id: 'school', name: 'School due dates', importance: 4, vibration: true, description: 'What is due tomorrow and today' });
         await LN.createChannel({ id: 'focus', name: 'Focus sprints', importance: 4, vibration: true, description: 'Sprint finished and check-ins' });
         await LN.registerActionTypes({ types: [
           { id: 'MISSION', actions: [{ id: 'start', title: '▶ Start' }, { id: 'snooze', title: '⏰ 10 min' }, { id: 'done', title: '✅ Done' }] },
@@ -394,7 +547,7 @@ const Reminders = {
         schedule: { at: o.at, allowWhileIdle: true },
         actionTypeId: o.kind === 'mission' ? 'MISSION' : o.kind === 'routine' ? 'ROUTINE' : undefined,
         extra: { kind: o.kind, taskId: o.taskId, routineId: o.routineId, key: o.key },
-        smallIcon: 'ic_stat_mainquest', iconColor: '#5ee0b5',
+        smallIcon: 'ic_stat_mainquest', iconColor: '#7dff8a',
       })) });
     } catch (e) { console.warn('schedule failed', e); }
   },
@@ -402,7 +555,7 @@ const Reminders = {
   async focusNotify(id, at, title, body) {
     if (Native.ok) {
       const LN = Native.plugin('LocalNotifications'); if (!LN) return;
-      try { await LN.schedule({ notifications: [{ id, title, body, channelId: 'focus', schedule: { at, allowWhileIdle: true }, actionTypeId: 'FOCUS', extra: { kind: 'focus' }, smallIcon: 'ic_stat_mainquest', iconColor: '#5ee0b5' }] }); } catch (e) { }
+      try { await LN.schedule({ notifications: [{ id, title, body, channelId: 'focus', schedule: { at, allowWhileIdle: true }, actionTypeId: 'FOCUS', extra: { kind: 'focus' }, smallIcon: 'ic_stat_mainquest', iconColor: '#7dff8a' }] }); } catch (e) { }
     } else {
       clearTimeout(this['_ft' + id]);
       this['_ft' + id] = setTimeout(() => this.webShow(title, body, { kind: 'focus' }), Math.max(0, at - Date.now()));
@@ -448,10 +601,11 @@ const Reminders = {
       return;
     }
     if (action === 'done' && t) { UI.finishQuick(t); return; }
-    if (action === 'start' && t) { UI.go('now'); Focus.preflight(t.id); return; }
+    if (action === 'start' && t) { UI.go('home'); Focus.preflight(t.id); return; }
     if (extra.routineId) { UI.go('routines'); UI.openRoutine(extra.routineId); return; }
     if (extra.kind === 'focus' && S.focus) { Focus.render(); return; }
-    if (t) { UI.go('now'); }
+    if (extra.kind === 'assign') { School.seg = 'due'; UI.go('school'); return; }
+    if (t) { UI.go('home'); }
   },
 };
 

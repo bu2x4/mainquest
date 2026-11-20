@@ -2,104 +2,43 @@
 /* MainQuest UI: views, sheets, onboarding, parent zone. */
 
 const UI = {
-  tab: 'now',
+  tab: 'home',
   quizStep: 0,
   quizAns: {},
-
   go(tab) { this.tab = tab; this.render(); $('#view').scrollTop = 0; },
 
   render() {
-    document.body.className = [
-      (THEMES.find(t => t.id === S.profile.theme) || {}).cls || '',
-      S.settings.light ? 'light' : '', S.settings.calm ? 'calm' : '', S.settings.bigtext ? 'bigtext' : '', S.settings.dyslexic ? 'dyslexic' : '',
-    ].join(' ');
+    const th = THEMES.find(t => t.id === S.player.theme) || THEMES[0];
+    document.documentElement.style.setProperty('--accent', th.accent);
+    document.documentElement.style.setProperty('--accent-ink', th.ink);
+    document.body.className = [S.settings.light ? 'light' : '', S.settings.calm ? 'calm' : '', S.settings.bigtext ? 'bigtext' : '', S.settings.dyslexic ? 'dyslexic' : ''].join(' ');
     if (!S.profile.onboarded) { $('#tabs').hidden = true; $('#orient').innerHTML = ''; this.onboarding(); return; }
+    ensureSeason(); ensureWeekly();
     $('#tabs').hidden = false;
     $$('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === this.tab));
-    $('#tab-buddy').textContent = buddyEmoji();
     this.orient();
     const v = $('#view');
-    v.innerHTML = this['view_' + this.tab]();
+    v.innerHTML = this.tab === 'calendar' ? Cal.view() : this.tab === 'school' ? School.view() : this['view_' + this.tab]();
+    School.loadThumbs(v);
     if (S.focus && $('#overlay').hidden) Focus.render();
   },
 
-  /* ---------- Orientation bar: time, day, what's next + time until it */
+  /* ---------- HUD: time, day, what's next, player chip */
   orient() {
     const now = new Date();
     const ev = upcomingEvents(now, 18)[0];
+    const lvl = levelFor(S.stats.xp), rk = rankFor(lvl), [lo, hi] = levelBounds(lvl);
     let next = '';
     if (ev) {
-      const mins = (ev.at - now) / 60e3;
-      const frac = clamp(1 - mins / 180, 0.03, 1);  // bar fills over the last 3 hours
-      next = `<div class="o-next"><span>Next: <b>${esc(ev.emoji)} ${esc(ev.title)}</b> in ${fmtDur(mins)}</span><div class="o-bar"><i style="width:${(frac * 100).toFixed(0)}%"></i></div></div>`;
+      const mins = (ev.at - now) / 60e3; const frac = clamp(1 - mins / 180, 0.03, 1);
+      next = `<div class="o-next"><span>Next: <b>${esc(ev.title)}</b> in ${fmtDur(mins)}</span><div class="o-bar"><i style="width:${(frac * 100).toFixed(0)}%"></i></div></div>`;
     }
-    $('#orient').innerHTML = `<div class="o-row"><span class="o-time">${fmtTime(now)}</span><span class="o-day">${now.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>${next}`;
+    $('#orient').innerHTML = `<div class="o-row"><div><span class="o-time">${fmtTime(now)}</span> <span class="o-day">${now.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span></div>
+      <button class="pchip" data-tab="me" aria-label="Profile">${emblemSVG(S.player.emblem, S.player.color, 30)}<span><b>Lv ${lvl}</b><small style="color:${rk.color}">${rk.name} ${rk.div}</small></span><i class="pbar"><i style="width:${((S.stats.xp - lo) / (hi - lo) * 100).toFixed(0)}%"></i></i></button></div>${next}`;
+    $('#orient .pchip').onclick = () => this.go('me');
   },
 
-  /* ================================================================ NOW */
-  view_now() {
-    const q = todayQueue();
-    const r = routineActive();
-    let main = '';
-    if (S.focus) {
-      const t = Focus.task();
-      main = `<div class="now-card"><div class="now-label">In progress</div><div class="now-title"><span class="em">${esc(t ? t.emoji : '🎯')}</span><span>${esc(t ? t.title : '')}</span></div>
-        <button class="btn primary big" data-a="resumeFocus">🎯 Jump back in</button></div>`;
-    } else if (r) {
-      const done = r.log[today()] || []; const item = r.items.find(i => !done.includes(i.id));
-      main = `<div class="now-card"><div class="now-label">${esc(r.emoji)} ${esc(r.name)} · ${done.length}/${r.items.length}</div>
-        <div class="now-title"><span class="em">${esc(item.emoji)}</span><span>${esc(item.text)}</span></div>
-        <div class="bar" style="margin:8px 0 14px"><i style="width:${done.length / r.items.length * 100}%"></i></div>
-        <button class="btn primary big" data-a="rtItem" data-r="${r.id}" data-i="${item.id}">✅ Done</button>
-        <div class="btn-row"><button class="btn small" data-a="openRoutine" data-r="${r.id}">See all steps</button><button class="btn small ghost" data-a="skipRoutine" data-r="${r.id}">Not now</button></div></div>`;
-    } else if (q.length) {
-      const t = q[0];
-      const firstStep = (t.steps || []).find(s => !s.done);
-      const carry = carriedDays(t);
-      main = `<div class="now-card ${t.size === 'boss' ? 'boss' : ''}">
-        <div class="now-label">${t.size === 'boss' ? '👹 Boss mission' : 'Your mission'}${t.time ? ' · ' + fmtHM(t.time) : ''}</div>
-        <div class="now-title"><span class="em">${esc(t.emoji)}</span><span>${esc(t.title)}</span></div>
-        ${t.anchor ? `<div class="sub">${esc(anchorText(t.anchor))} → then this.</div>` : ''}
-        <div class="now-step">${firstStep ? `First tiny step: <b>${esc(firstStep.text)}</b>` : `<button class="chip" data-a="chop" data-id="${t.id}">🔪 Chop into tiny steps</button>`}
-          ${carry ? ` <span class="pill">Carried over</span>` : ''}</div>
-        <button class="btn primary big" data-a="start" data-id="${t.id}">▶ Start</button>
-        <div class="btn-row">
-          <button class="btn small" data-a="quickDone" data-id="${t.id}">✅ Done</button>
-          <button class="btn small" data-a="notNow" data-id="${t.id}">⏭ Not now</button>
-          ${S.profile.style.start === 'spin' && q.length > 1 ? `<button class="btn small" data-a="spin">🎲 Spin</button>` : `<button class="btn small" data-a="stuckNow" data-id="${t.id}">😵 Stuck</button>`}
-        </div></div>`;
-    } else {
-      main = `<div class="now-card now-empty"><div class="big">${buddyEmoji()}</div>
-        <div class="now-title" style="justify-content:center">No missions right now</div>
-        <p class="sub">${esc(pick(BUDDY_LINES.hello))}</p>
-        <div class="quickadd"><input id="qa-now" placeholder="Add a mission…" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-a="qaNow">＋</button></div>
-        <button class="btn ghost block" data-a="plan">🗺️ Plan my day</button></div>`;
-    }
-    const nextUp = !S.focus && q.length > (r ? 0 : 1) ? q[r ? 0 : 1] : null;
-    const note = S.notes.find(n => !n.read);
-    const tip = this.dailyTip();
-    const insights = this.insights();
-    const wk = goodDaysThisWeek(), goal = S.settings.weekGoal;
-    const lvl = levelFor(S.stats.xp), [lo, hi] = levelBounds(lvl);
-    return `
-      ${main}
-      ${nextUp ? `<div class="task" data-a="openTask" data-id="${nextUp.id}"><span class="em">${esc(nextUp.emoji)}</span><div class="grow"><div class="faint">Next up</div><div class="t">${esc(nextUp.title)}</div></div><span class="faint">${q.length - (r ? 0 : 1) > 1 ? `+${q.length - (r ? 1 : 2)} more` : ''}</span></div>` : ''}
-      ${note ? `<div class="card" style="border:2px solid var(--accent2)"><div class="faint">💌 Message from ${esc(note.from || 'Dad')}</div><div style="font-size:19px;font-weight:700;margin:6px 0 10px">${esc(note.text)}</div><button class="btn small gold" data-a="readNote" data-id="${note.id}">❤️ Got it</button></div>` : ''}
-      <div class="card buddy-card" data-a="tab" data-t="me">
-        <div class="buddy-mini">${buddyEmoji()}</div>
-        <div class="grow"><div class="row" style="justify-content:space-between"><b>${esc(S.profile.buddyName)} · Lvl ${lvl}</b><span class="pill gold">🪙 ${S.stats.coins}</span></div>
-          <div class="bar" style="margin:6px 0"><i style="width:${((S.stats.xp - lo) / (hi - lo) * 100).toFixed(0)}%"></i></div>
-          <div class="row" style="justify-content:space-between"><span class="faint">Good days this week</span><div class="dots">${Array.from({ length: Math.max(goal, wk) }, (_, i) => `<i class="${i < wk ? 'on' : ''}">${i < wk ? '★' : ''}</i>`).join('')}</div></div></div>
-      </div>
-      ${this.timeBudget(q)}
-      ${insights.slice(0, 1).map(i => `<div class="card soft"><div class="faint">💡 Noticed something</div><div style="margin:6px 0 10px">${esc(i.text)}</div>${i.btn ? `<button class="btn small" data-a="insight" data-k="${i.id}">${esc(i.btn)}</button>` : ''}</div>`).join('')}
-      ${tip ? `<div class="card tip"><div class="faint">🧭 Coach tip</div><b style="font-size:18px">${esc(tip.t)}</b><p class="sub" style="margin:6px 0 10px">${esc(tip.d)}</p>
-        <div class="row">${tip.task ? `<button class="btn small" data-a="tipTask" data-k="${tip.id}">＋ Make it a mission</button>` : `<button class="btn small" data-a="tipLike" data-k="${tip.id}">👍 I’ll try it</button>`}<button class="btn small ghost" data-a="tipHide" data-k="${tip.id}">Not for me</button></div></div>` : ''}
-      ${S.parking.length ? `<button class="list-btn" data-a="parking"><span class="em">🅿️</span>Parking Lot · ${S.parking.length} thought${S.parking.length > 1 ? 's' : ''}<span class="chev">›</span></button>` : ''}
-    `;
-  },
-
-  timeBudget(q) {
+  /* ================================================================ HOME */  timeBudget(q) {
     const now = new Date(); const bed = atTime(S.settings.bedtime);
     if (now.getHours() < 12 || now >= bed || inSchoolQuiet(now)) return '';
     const left = (bed - now) / 60e3;
@@ -114,36 +53,7 @@ const UI = {
       <div class="row wrap faint" style="gap:14px"><span>🟩 Missions ~${fmtDur(missions)}</span><span>🟦 Routines ~${fmtDur(routines)}</span><span>🟨 Free time ~${fmtDur(free)}</span></div></div>`;
   },
 
-  /* ================================================================ MISSIONS */
-  view_missions() {
-    const q = todayQueue();
-    const later = S.tasks.filter(t => !t.done && (t.when === 'later' || (t.date && t.date > today())));
-    const done = S.tasks.filter(t => t.done && t.doneAt && dayKey(new Date(t.doneAt)) === today());
-    const speech = ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window);
-    const row = (t, i) => {
-      const carry = carriedDays(t);
-      const meta = [t.time && `⏰ ${fmtHM(t.time)}`, t.anchor && anchorText(t.anchor), (t.steps || []).length && `${t.steps.filter(s => s.done).length}/${t.steps.length} steps`,
-        carry && 'Carried over', t.date && t.date > today() && (t.date === dayKey(addDays(new Date(), 1)) ? 'Tomorrow' : new Date(t.date + 'T12:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }))].filter(Boolean).join(' · ');
-      return `<div class="task ${carry ? 'carry' : ''} ${t.done ? 'done' : ''} ${t.size === 'boss' ? 'boss' : ''}">
-        <button class="check ${t.done ? 'on' : ''}" data-a="${t.done ? 'undo' : 'quickDone'}" data-id="${t.id}" aria-label="Done">${t.done ? '✓' : ''}</button>
-        <div class="grow" data-a="openTask" data-id="${t.id}"><div class="t">${i !== undefined && i < 3 ? `<span class="pill">${i + 1}</span> ` : ''}${esc(t.emoji)} ${esc(t.title)}</div>${meta ? `<div class="meta">${esc(meta)}</div>` : ''}</div>
-        ${!t.done && i !== undefined ? `<button class="iconbtn" data-a="start" data-id="${t.id}" aria-label="Start">▶</button>` : ''}</div>`;
-    };
-    return `
-      <h1>Missions</h1>
-      <div class="quickadd"><input id="qa" placeholder="What do you need to do?" enterkeyhint="done" autocomplete="off">
-        ${speech ? `<button class="iconbtn" data-a="mic" aria-label="Say it">🎤</button>` : ''}<button class="iconbtn" data-a="qa" aria-label="Add">＋</button></div>
-      <p class="faint" style="margin:-4px 4px 10px">Tip: type “math at 4pm” or “science project tomorrow”.</p>
-      <div class="row"><h2 class="grow" style="margin:12px 4px 10px">Today ${q.length ? `· ${q.length}` : ''}</h2><button class="btn small" data-a="plan">🗺️ Plan</button></div>
-      ${q.length ? q.map((t, i) => row(t, i)).join('') : `<div class="card soft center sub">Nothing for today yet. Add one above 👆</div>`}
-      ${q.length > 3 ? `<p class="faint center">Top 3 are numbered. Three done beats ten started.</p>` : ''}
-      ${later.length ? `<details class="fold"><summary>Later · ${later.length}</summary>${later.map(t => row(t)).join('')}</details>` : ''}
-      ${done.length ? `<details class="fold"><summary>Done today · ${done.length} 🎉</summary>${done.map(t => row(t)).join('')}</details>` : ''}
-    `;
-  },
-
-  /* ================================================================ ROUTINES */
-  view_routines() {
+  /* ================================================================ MISSIONS */  view_routines() {
     const wd = new Date().getDay();
     const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
     return `<h1>Routines</h1><p class="sub" style="margin:-4px 4px 12px">Same steps, same order, every time — so your brain doesn’t have to remember.</p>
@@ -156,7 +66,6 @@ const UI = {
       }).join('')}
       <button class="btn ghost block" data-a="newRoutine">＋ New routine</button>`;
   },
-
   openRoutine(id) {
     const r = S.routines.find(x => x.id === id); if (!r) return;
     const dk = today(); const done = r.log[dk] || [];
@@ -169,24 +78,23 @@ const UI = {
       <div class="spacer"></div><button class="btn primary block" data-x="close">${allDone ? 'Nice! Close' : 'Close'}</button>`, root => {
       root.onclick = e => {
         const b = e.target.closest('[data-x]'); if (!b) return;
-        if (b.dataset.x === 'toggle') { this.toggleRoutineItem(r, b.dataset.i); this.openRoutine(id); }
+        if (b.dataset.x === 'toggle') { const it = r.items.find(i => i.id === b.dataset.i); if (it && it.action === 'scan' && !(r.log[today()] || []).includes(it.id)) { this.closeSheet(); return School.scan(); } this.toggleRoutineItem(r, b.dataset.i); this.openRoutine(id); }
         if (b.dataset.x === 'edit') this.editRoutine(id);
         if (b.dataset.x === 'close') { this.closeSheet(); this.render(); }
       };
     });
   },
-
   toggleRoutineItem(r, itemId) {
     const dk = today(); r.log[dk] = r.log[dk] || [];
     const arr = r.log[dk];
     if (arr.includes(itemId)) { arr.splice(arr.indexOf(itemId), 1); save(); return; }
     arr.push(itemId); award(XP.routineItem); markGoodDay(); Sfx.play('step'); buzz();
-    if (arr.length >= r.items.length) { award(XP.routineAll); Sfx.play('done'); confetti(0.7); buzz('success'); this.toast(`${r.emoji} ${r.name} complete! +${XP.routineAll + XP.routineItem} XP`); }
+    if (itemId === 'r-bed-0') S.stats.loadout++;
+    if (arr.length >= r.items.length) { track('routine:' + r.id); if (r.id === 'r-sunday') unlockAch('gameplan'); award(XP.routineAll); Sfx.play('done'); confetti(0.7); buzz('success'); this.toast(`${r.name}: cleared. +${XP.routineAll + XP.routineItem} XP`); }
     // keep logs for 30 days
     const cutoff = dayKey(addDays(new Date(), -30)); Object.keys(r.log).forEach(k => { if (k < cutoff) delete r.log[k]; });
     save();
   },
-
   editRoutine(id) {
     const isNew = !id;
     const r = isNew ? { id: 'r-' + uid(), name: '', emoji: '⭐', time: '16:00', days: [1, 2, 3, 4, 5], remind: true, items: [], log: {} } : JSON.parse(JSON.stringify(S.routines.find(x => x.id === id)));
@@ -230,60 +138,63 @@ const UI = {
 
   /* ================================================================ ME */
   view_me() {
-    const lvl = levelFor(S.stats.xp), [lo, hi] = levelBounds(lvl);
-    const stage = buddyStage(lvl); const nextStageLvl = STAGE_LEVELS[stage + 1];
-    const st = S.profile.style;
-    const ins = this.statsSummary();
+    const lvl = levelFor(S.stats.xp), rk = rankFor(lvl), [lo, hi] = levelBounds(lvl);
+    const P = S.player; const banner = BANNERS.find(b => b.id === P.banner) || BANNERS[0];
+    const title = TITLES.find(t => t.id === P.title) || TITLES[0];
+    const tier = seasonTier(); const ins = this.statsSummary();
     const pending = S.redemptions.filter(r => r.status === 'pending');
+    const daysLeft = Math.max(0, Math.ceil((seasonEnds() - Date.now()) / 864e5));
     return `
-      <div class="card center" style="padding-top:20px">
-        <div class="buddy">${buddyEmoji()}</div>
-        <div style="font-size:22px;font-weight:800;margin-top:8px">${esc(S.profile.buddyName)}</div>
-        <div class="faint">${STAGE_NAMES[stage]} ${esc((BUDDIES[S.profile.buddy] || BUDDIES.dragon).name)} · Level ${lvl}${nextStageLvl ? ` · evolves at level ${nextStageLvl}` : ' · fully evolved!'}</div>
-        <div class="bar" style="margin:12px 0 4px"><i style="width:${((S.stats.xp - lo) / (hi - lo) * 100).toFixed(0)}%"></i></div>
-        <div class="faint">${S.stats.xp - lo} / ${hi - lo} XP to level ${lvl + 1}</div>
+      <div class="pcard" style="background:${banner.css}">
+        <div class="row">${emblemSVG(P.emblem, P.color, 64)}<div class="grow"><div class="ptag">${esc(P.tag || 'Player')}</div><div class="ptitle">${esc(title.name)}</div></div>
+          <div class="rank" style="--rc:${rk.color}"><b>${rk.name}</b><small>${rk.div}</small></div></div>
+        <div class="row" style="margin-top:14px;justify-content:space-between"><span class="faint">Level ${lvl}</span><span class="faint">${S.stats.xp - lo}/${hi - lo} XP</span></div>
+        <div class="bar"><i style="width:${((S.stats.xp - lo) / (hi - lo) * 100).toFixed(0)}%"></i></div>
+        <div class="row" style="margin-top:10px;gap:8px">${S.boosts ? `<span class="pill gold">${S.boosts}× 2XP boost</span>` : ''}<span class="pill">🪙 ${S.stats.coins}</span><button class="btn small ghost" data-a="customize" style="margin-left:auto">Customize</button></div>
       </div>
       <div class="grid3">
-        <div class="card stat"><b>${S.stats.missions}</b><span class="faint">missions</span></div>
-        <div class="card stat"><b>${totalGoodDays()}</b><span class="faint">good days</span></div>
+        <div class="card stat"><b>${S.stats.missions}</b><span class="faint">cleared</span></div>
+        <div class="card stat"><b>${S.stats.bossesDown}</b><span class="faint">bosses</span></div>
         <div class="card stat"><b>${fmtDur(S.stats.focusMin)}</b><span class="faint">focused</span></div>
       </div>
 
-      <h2>🎁 Reward shop <span class="pill gold">🪙 ${S.stats.coins}</span></h2>
+      <h2>Season ${S.season.id} <span class="faint">· ${daysLeft} days left · tier ${tier}/${SEASON_TRACK.length - 1}</span></h2>
+      <div class="card"><div class="bar"><i style="width:${Math.min(100, (S.season.xp % SEASON_TIER_XP) / SEASON_TIER_XP * 100)}%"></i></div>
+        <div class="faint" style="margin:6px 0 10px">${S.season.xp} season XP · next tier at ${(tier + 1) * SEASON_TIER_XP}</div>
+        <div class="track">${SEASON_TRACK.map((r, i) => { if (!r) return ''; const got = S.season.claimed.includes(i), can = i <= tier && !got;
+          const label = r.banner ? 'Banner' : r.theme ? 'Theme' : r.color ? 'Color' : r.title ? 'Title' : r.boost ? `${r.boost}× 2XP` : '';
+          return `<button class="tier ${got ? 'got' : can ? 'can' : ''}" data-a="claim" data-k="${i}" ${can ? '' : 'disabled'}><small>${i}</small><span>${got ? '✓' : can ? '🎁' : '🔒'}</span><em>${label}</em></button>`; }).join('')}</div>
+        <p class="faint" style="margin:8px 0 0">Free track. Anything you unlock is yours forever.</p></div>
+
+      <h2>Achievements · ${Object.keys(S.achievements).length}/${ACHIEVEMENTS.length}</h2>
+      <div class="ach-grid">${ACHIEVEMENTS.map(a => `<div class="ach ${S.achievements[a.id] ? 'on' : ''}" title="${esc(a.desc)}"><b>${esc(a.name)}</b><small>${esc(a.desc)}</small></div>`).join('')}</div>
+
+      <h2>Rewards <span class="pill gold">🪙 ${S.stats.coins}</span></h2>
       ${S.rewards.map(r => `<div class="task"><span class="em">${esc(r.emoji)}</span><div class="grow"><div class="t">${esc(r.name)}</div><div class="meta">🪙 ${r.cost}</div></div>
-        <button class="btn small ${S.stats.coins >= r.cost ? 'gold' : ''}" data-a="redeem" data-id="${r.id}" ${S.stats.coins >= r.cost ? '' : 'disabled'}>${S.stats.coins >= r.cost ? 'Get it' : `${r.cost - S.stats.coins} to go`}</button></div>`).join('')}
-      ${pending.length ? `<p class="faint">⏳ Waiting for a grown-up: ${pending.map(p => esc(p.name)).join(', ')}</p>` : ''}
-      <button class="btn ghost block" data-a="wish">💭 Wish for a new reward</button>
+        <button class="btn small ${S.stats.coins >= r.cost ? 'gold' : ''}" data-a="redeem" data-id="${r.id}" ${S.stats.coins >= r.cost ? '' : 'disabled'}>${S.stats.coins >= r.cost ? 'Redeem' : `${r.cost - S.stats.coins} to go`}</button></div>`).join('')}
+      ${pending.length ? `<p class="faint">Waiting on a grown-up: ${pending.map(p => esc(p.name)).join(', ')}</p>` : ''}
+      <button class="btn ghost block" data-a="wish">Suggest a reward</button>
 
-      <h2>🧩 Sticker collection · ${S.stickers.length}/${STICKERS.length}</h2>
-      <div class="card"><div class="stickers">${STICKERS.map(s => S.stickers.includes(s) ? `<span>${s}</span>` : `<span class="locked">?</span>`).join('')}</div>
-        <p class="faint" style="margin:10px 0 0">Stickers come from surprise chests 🎁 when you finish missions.</p></div>
-
-      <h2>🎨 Themes</h2>
-      <div class="chips">${THEMES.map(t => S.unlockedThemes.includes(t.id) ? `<button class="chip ${S.profile.theme === t.id ? 'on' : ''}" data-a="theme" data-id="${t.id}">${esc(t.name)}</button>` : `<span class="chip" style="opacity:.5">🔒 ${esc(t.name)} · Lvl ${t.level}</span>`).join('')}</div>
-
-      <h2>🧠 My style</h2>
+      <h2>My style</h2>
       <div class="card">
         <div class="row wrap" style="gap:8px">
-          <span class="pill">${{ morning: '🌅 Morning brain', afterschool: '🏫 After-school brain', evening: '🌙 Evening brain', unsure: '🤷 Still figuring out my best time' }[st.peak]}</span>
-          <span class="pill">⏱️ ${st.sprint}-min sprints</span>
-          <span class="pill">${{ easy: '🍰 Warm-up first', hard: '🐸 Hardest first', spin: '🎲 Spin to pick' }[st.start]}</span>
-          ${(st.helpers || []).map(h => `<span class="pill">${{ music: '🎧 Music', quiet: '🤫 Quiet', someone: '🧍 Company', move: '🤸 Move first', fidget: '🧸 Fidget' }[h]}</span>`).join('')}
-          <span class="pill">${{ hype: '📣 Hype', chill: '😎 Chill', coach: '🏈 Coach', funny: '🤪 Funny' }[st.voice]} reminders</span>
+          <span class="pill">${{ morning: 'Morning brain', afterschool: 'After-school brain', evening: 'Evening brain', unsure: 'Best time: TBD' }[S.profile.style.peak]}</span>
+          <span class="pill">${S.profile.style.sprint}-min sprints</span>
+          <span class="pill">${{ easy: 'Warm-up first', hard: 'Hardest first', spin: 'Spin to pick' }[S.profile.style.start]}</span>
+          <span class="pill">Grade ${P.grade}</span>
         </div>
-        ${ins.length ? `<div style="margin-top:12px">${ins.map(i => `<div class="sub" style="margin:6px 0">• ${esc(i)}</div>`).join('')}</div>` : `<p class="faint">Finish a few missions and I’ll learn what works for you.</p>`}
-        <button class="btn small" data-a="retake" style="margin-top:8px">Retake the style quiz</button>
+        ${ins.length ? `<div style="margin-top:12px">${ins.map(i => `<div class="sub" style="margin:6px 0">• ${esc(i)}</div>`).join('')}</div>` : `<p class="faint">Clear a few missions and the app learns what works for you.</p>`}
+        <button class="btn small" data-a="retake" style="margin-top:8px">Retake style quiz</button>
       </div>
 
-      <h2>⚙️ Settings</h2>
-      ${[['sound', '🔊 Sounds'], ['haptics', '📳 Vibration'], ['calm', '🧘 Calm mode (no animations)'], ['light', '☀️ Light mode'], ['bigtext', '🔠 Bigger text'], ['dyslexic', '🔤 Easy-read font']].map(([k, l]) =>
+      <h2>Settings</h2>
+      ${[['sound', 'Sounds'], ['haptics', 'Vibration'], ['calm', 'Calm mode (no animations)'], ['light', 'Light mode'], ['bigtext', 'Bigger text'], ['dyslexic', 'Extra letter spacing']].map(([k, l]) =>
         `<div class="list-btn" data-a="toggle" data-k="${k}">${l}<span class="switch ${S.settings[k] ? 'on' : ''}" style="margin-left:auto"></span></div>`).join('')}
-      <button class="list-btn" data-a="checkins"><span class="em">👀</span>Focus check-ins: <b>${{ off: 'Off', gentle: 'Once per sprint', normal: 'Every few minutes' }[S.settings.checkins]}</b><span class="chev">›</span></button>
-      <button class="list-btn" data-a="notifs"><span class="em">🔔</span>Reminders &amp; notifications<span class="chev">›</span></button>
-      <button class="list-btn" data-a="parent"><span class="em">🔒</span>Grown-up zone<span class="chev">›</span></button>
-      <p class="faint center" style="margin-top:20px">MainQuest · everything stays on this phone</p>`;
+      <button class="list-btn" data-a="checkins">Focus check-ins: <b style="margin-left:6px">${{ off: 'Off', gentle: 'Once per sprint', normal: 'Every few minutes' }[S.settings.checkins]}</b><span class="chev">›</span></button>
+      <button class="list-btn" data-a="notifs">Reminders &amp; notifications<span class="chev">›</span></button>
+      <button class="list-btn" data-a="parent">Grown-up zone<span class="chev">›</span></button>
+      <p class="faint center" style="margin-top:16px">Grown-ups see: missions cleared, what’s due, focus minutes. Not your parking lot.${S.settings.parentSeen ? `<br>Last grown-up check: ${new Date(S.settings.parentSeen).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : ''}</p>`;
   },
-
   statsSummary() {
     const out = [];
     const est = S.stats.estimates.slice(-8);
@@ -299,7 +210,6 @@ const UI = {
     if (S.stats.bestWeek) out.push(`Best week so far: ${S.stats.bestWeek} good days.`);
     return out;
   },
-
   bestTime() {
     const hours = S.tasks.filter(t => t.done && t.doneAt).map(t => new Date(t.doneAt).getHours()).concat(S.stats.sessions.map(s => s.hour));
     if (hours.length < 8) return null;
@@ -310,8 +220,7 @@ const UI = {
     return { key: k, label: { morning: 'morning', afterschool: 'afternoon (after school)', evening: 'evening' }[k] };
   },
 
-  /* Style alignment from real behaviour: suggest, never force. */
-  insights() {
+  /* Style alignment from real behaviour: suggest, never force. */  insights() {
     const out = []; const st = S.profile.style;
     const recent = S.stats.sessions.filter(s => s.planned === st.sprint).slice(-8);
     if (recent.length >= 5 && !S.tips.seen['ins-sprint-' + st.sprint]) {
@@ -326,7 +235,6 @@ const UI = {
     if (later.length) out.push({ id: 'parked', text: `${later.length} mission${later.length > 1 ? 's' : ''} moved to Later so Today stays clean. Check if any still matter.`, btn: 'Look at Later' });
     return out;
   },
-
   dailyTip() {
     const t = S.tips; const d = today();
     if (t.day === d) return t.current ? TIPS.find(x => x.id === t.current) : null;
@@ -342,21 +250,17 @@ const UI = {
     return tip;
   },
 
-  /* ================================================================ Sheets & toasts */
-  sheet(html, bind) {
+  /* ================================================================ Sheets & toasts */  sheet(html, bind) {
     const w = $('#sheet-wrap'), s = $('#sheet');
     s.innerHTML = html; w.hidden = false;
     w.onclick = e => { if (e.target === w) this.closeSheet(); };
     bind && bind(s);
     const first = s.querySelector('input:not([type=time]):not([type=date])'); if (first && first.dataset.autofocus) first.focus();
-  },
-  closeSheet() { $('#sheet-wrap').hidden = true; $('#sheet').innerHTML = ''; },
-  toast(msg, action, fn, ms = 2600) {
+  },  closeSheet() { $('#sheet-wrap').hidden = true; $('#sheet').innerHTML = ''; },  toast(msg, action, fn, ms = 2600) {
     const el = $('#toast'); el.innerHTML = esc(msg) + (action ? ` <button>${esc(action)}</button>` : ''); el.hidden = false;
     if (action) el.querySelector('button').onclick = () => { el.hidden = true; fn(); };
     clearTimeout(this._tt); this._tt = setTimeout(() => { el.hidden = true; }, action ? 6000 : ms);
-  },
-  banner(o) {
+  },  banner(o) {
     // In-app reminder (web fallback): one clear action.
     const t = o.taskId && S.tasks.find(x => x.id === o.taskId);
     if (S.focus) { this.toast(`${o.title}: ${o.body}`); return; }
@@ -374,14 +278,15 @@ const UI = {
     });
   },
 
-  levelUp(lvl, evolved, themes) {
-    if (S.focus) { this._pendingLevel = [lvl, evolved || (this._pendingLevel || [])[1], themes.concat((this._pendingLevel || [])[2] || [])]; return; }
-    Sfx.play('level'); buzz('success'); confetti(1.5);
-    this.sheet(`<div class="grab"></div><div class="buddy pop">${buddyEmoji()}</div>
-      <h3 class="center">${evolved ? `${esc(S.profile.buddyName)} evolved! ✨` : `Level ${lvl}!`}</h3>
-      <p class="center sub">${evolved ? `Now a ${STAGE_NAMES[buddyStage(lvl)]}. All because you kept showing up.` : 'You leveled up. Keep stacking missions!'}</p>
-      ${themes.length ? `<p class="center">🎨 New theme: <b>${themes.map(t => esc(t.name)).join(', ')}</b></p>` : ''}
-      <button class="btn primary block" data-x="ok">Awesome!</button>`, root => { root.onclick = e => { if (e.target.closest('[data-x]')) { this.closeSheet(); this.render(); } }; });
+  levelUp(lvl, rankUp, fresh) {
+    if (S.focus) { this._pendingLevel = [lvl, rankUp || (this._pendingLevel || [])[1], (fresh || []).concat((this._pendingLevel || [])[2] || [])]; return; }
+    const rk = rankFor(lvl);
+    Sfx.play('level'); buzz('success'); confetti(1.4);
+    this.sheet(`<div class="grab"></div><div class="center pop">${emblemSVG(S.player.emblem, S.player.color, 84)}</div>
+      <h3 class="center">${rankUp ? `Rank up: ${rk.name} ${rk.div}` : `Level ${lvl}`}</h3>
+      <p class="center sub">${rankUp ? 'Earned, not given.' : 'Keep stacking.'}</p>
+      ${fresh && fresh.length ? `<p class="center">Unlocked: <b>${fresh.map(esc).join(', ')}</b></p>` : ''}
+      <button class="btn primary block" data-x="ok">Nice</button>`, root => { root.onclick = e => { if (e.target.closest('[data-x]')) { this.closeSheet(); this.render(); } }; });
   },
 
   finishQuick(t) {
@@ -389,12 +294,13 @@ const UI = {
     if (!res) return;
     Sfx.play('done'); buzz('success'); confetti(0.8);
     this.render();
-    this.toast(`${pick(BUDDY_LINES.done)} +${res.total} XP${res.chest ? ' · 🎁 ' + res.chest.text : ''}`, 'Undo', () => {
+    const left = todayQueue().length;
+    this.toast(`${pick(LINES.done)} +${res.total} XP${res.bossMsg ? ' · ' + res.bossMsg : ''}${res.drop ? ' · ' + res.drop.text : ''}${left ? ` · ${left} left` : ''}`, 'Undo', () => {
       t.done = false; t.doneAt = null; S.stats.missions--; S.stats.xp = Math.max(0, S.stats.xp - res.total); S.stats.coins = Math.max(0, S.stats.coins - res.total); save(); this.render();
     });
   },
 
-  parkSheet(cb) {
+  /* ================================================================ Onboarding (~2 min) */  parkSheet(cb) {
     this.sheet(`<div class="grab"></div><h3>🅿️ Park a thought</h3><p class="sub">Write it down so your brain can let go. You’ll come back to it later.</p>
       <input class="field" id="park-in" data-autofocus="1" placeholder="e.g. ask Dad about Saturday" enterkeyhint="done">
       <div class="spacer"></div><button class="btn primary block" data-x="park">Park it</button>
@@ -412,8 +318,7 @@ const UI = {
     });
   },
 
-  /* ---------- Task details */
-  taskSheet(t) {
+  /* ---------- Task details */  taskSheet(t) {
     const anchors = [['', 'No plan'], ['afterschool', '🏫 After school'], ['aftersnack', '🍎 After snack'], ['afterdinner', '🍽️ After dinner'], ['beforebed', '🌙 Before bed']];
     const sizes = [['tiny', '🐭 Tiny'], ['small', '🐶 Medium'], ['big', '🐘 Big'], ['boss', '👹 Boss']];
     const tomorrow = dayKey(addDays(new Date(), 1));
@@ -473,11 +378,9 @@ const UI = {
       };
     });
     draw();
-  },
-  saveTask(t) { if (!S.tasks.includes(t)) S.tasks.push(t); save(); },
+  },  saveTask(t) { if (!S.tasks.includes(t)) S.tasks.push(t); save(); },
 
-  /* ---------- Plan my day: pick ≤3, give each a When → Then */
-  planSheet() {
+  /* ---------- Plan my day: pick ≤3, give each a When → Then */  planSheet() {
     const all = S.tasks.filter(t => !t.done);
     const chosen = new Set(todayQueue().slice(0, 3).map(t => t.id));
     const draw = () => this.sheet(`<div class="grab"></div><h3>🗺️ Plan my day</h3>
@@ -500,15 +403,14 @@ const UI = {
             if (chosen.has(t.id)) { t.when = 'today'; t.date = today(); t.parkedAuto = false; }
             else if (isToday(t)) { t.when = 'later'; t.date = null; t.time = ''; }
           });
-          save(); this.closeSheet(); this.go('now'); this.toast('Plan locked in 🔒 One at a time!');
+          save(); this.closeSheet(); this.go('home'); this.toast('Plan locked. One at a time.');
         }
       };
     });
     draw();
   },
 
-  /* ---------- Quick add with tiny natural-language parsing */
-  quickAdd(text) {
+  /* ---------- Quick add with tiny natural-language parsing */  quickAdd(text) {
     text = (text || '').trim(); if (!text) return;
     const extra = {};
     if (/\btomorrow\b/i.test(text)) { extra.when = 'tomorrow'; text = text.replace(/\btomorrow\b/i, ''); }
@@ -525,7 +427,6 @@ const UI = {
     this.render();
     this.toast(`Added ${t.emoji} ${t.title}${t.time ? ' · ⏰ ' + fmtHM(t.time) : ''}`, 'Details', () => this.taskSheet(t));
   },
-
   mic() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
     const rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false; rec.maxAlternatives = 1;
@@ -542,11 +443,15 @@ const UI = {
     const prog = `<div class="q-progress">${Array.from({ length: total }, (_, i) => `<i class="${i <= step ? 'on' : ''}"></i>`).join('')}</div>`;
     let html = '';
     if (step === 0) {
-      html = `<div class="big-emoji">🎯</div><h1 class="center">Welcome to MainQuest</h1>
-        <p class="center sub">One mission at a time. Reminders that actually help. A buddy that levels up with you.</p>
-        <label class="lbl">What should I call you?</label><input class="field" id="ob-name" value="${esc(A.name || '')}" placeholder="Your name" autocomplete="off">
-        <div class="spacer"></div><button class="btn primary big" data-o="next">Let’s go →</button>
-        <p class="faint center">6 quick questions so the app fits how YOUR brain works.</p>`;
+      A.emblem = A.emblem || 'bolt'; A.color = A.color || '#7dff8a';
+      html = `<div class="center" style="margin-top:20px">${emblemSVG(A.emblem, A.color, 72)}</div><h1 class="center">MainQuest</h1>
+        <p class="center sub">Your planner, built like a game. One mission at a time.</p>
+        <label class="lbl">Gamertag</label><input class="field" id="ob-name" value="${esc(A.name || '')}" placeholder="What should we call you?" autocomplete="off" maxlength="18">
+        <label class="lbl">Grade</label><div class="chips">${[5, 6, 7, 8, 9].map(g => `<button class="chip ${A.grade === g ? 'on' : ''}" data-o="grade" data-k="${g}">${g}th</button>`).join('')}</div>
+        <label class="lbl">Emblem</label><div class="emb-grid">${Object.keys(EMBLEMS).map(k => `<button class="emb ${A.emblem === k ? 'on' : ''}" data-o="emb" data-k="${k}">${emblemSVG(k, A.color, 36, false)}</button>`).join('')}</div>
+        <div class="chips" style="margin-top:10px">${EMBLEM_COLORS.slice(0, 6).map(c => `<button class="swatch-btn ${A.color === c ? 'on' : ''}" data-o="col" data-k="${c}" style="background:${c}" aria-label="color"></button>`).join('')}</div>
+        <div class="spacer"></div><button class="btn primary big" data-o="next">Next →</button>
+        <p class="faint center">6 quick questions so it fits how your brain works.</p>`;
     } else if (step <= QUIZ.length) {
       const q = QUIZ[step - 1]; const cur = A[q.k];
       html = `${prog}<h1>${esc(q.q)}</h1>${q.opts.map(([val, em, label], i) => {
@@ -555,57 +460,50 @@ const UI = {
         ${q.multi ? `<button class="btn primary big" data-o="next">Next →</button>` : ''}
         <button class="btn ghost block" data-o="back" style="margin-top:8px">← Back</button>`;
     } else if (step === QUIZ.length + 1) {
-      html = `${prog}<h1>Pick your buddy</h1><p class="sub">It grows every time you finish stuff. It never gets sad or hungry — it’s just happy you’re here.</p>
-        <div class="grid2">${Object.entries(BUDDIES).map(([k, b]) => `<button class="q-opt ${A.buddy === k ? 'on' : ''}" data-o="buddy" data-k="${k}" style="flex-direction:column;justify-content:center"><span class="em" style="font-size:44px">${b.stages[0]}→${b.stages[4]}</span>${esc(b.name)}</button>`).join('')}</div>
-        <label class="lbl">Name your buddy</label><input class="field" id="ob-buddy" value="${esc(A.buddyName || '')}" placeholder="e.g. Sparky" autocomplete="off">
-        <div class="spacer"></div><button class="btn primary big" data-o="next">Next →</button><button class="btn ghost block" data-o="back" style="margin-top:8px">← Back</button>`;
+      html = `${prog}<h1 class="center">Turn on reminders?</h1>
+        <p class="center sub">A heads-up before things start, what’s due tomorrow, and a nudge if you drift. No spam.</p>
+        <div class="spacer"></div><button class="btn primary big" data-o="notif">Turn on</button>
+        <button class="btn ghost block" data-o="next" style="margin-top:8px">Later</button>`;
     } else if (step === QUIZ.length + 2) {
-      html = `${prog}<div class="big-emoji">🔔</div><h1 class="center">Turn on reminders?</h1>
-        <p class="center sub">MainQuest gives a heads-up 5 minutes before things, a nudge when it’s time, and helps you get back on track. No spam — promise.</p>
-        <div class="spacer"></div><button class="btn primary big" data-o="notif">Yes, remind me</button>
-        <button class="btn ghost block" data-o="next" style="margin-top:8px">Maybe later</button>`;
+      html = `${prog}<h1>Anything due soon?</h1><p class="sub">Add homework, a test, or a project. Tests and projects become boss fights with a study plan on your calendar.</p>
+        <button class="btn primary big block" data-o="assign">＋ Add something due</button>
+        <div id="ob-list">${(S.assignments || []).map(a => `<div class="task"><span class="em">${atype(a.type).icon}</span><div class="grow"><div class="t">${esc(a.title)}</div><div class="meta">${dueLabel(a.due)}</div></div></div>`).join('')}</div>
+        <div class="spacer"></div><button class="btn big block" data-o="next">${S.assignments.length ? 'Next →' : 'Skip for now'}</button>`;
     } else {
-      html = `${prog}<div class="big-emoji">${(BUDDIES[A.buddy || 'dragon']).stages[0]}</div><h1 class="center">First missions</h1>
-        <p class="center sub">What do you need to do today or tomorrow? Add 1–3 things (you can skip this).</p>
-        <div class="quickadd"><input id="ob-task" placeholder="e.g. math worksheet at 4pm" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-o="addtask">＋</button></div>
-        <div id="ob-list">${(A.tasks || []).map(t => `<div class="task"><span class="em">${autoEmoji(t)}</span><div class="t">${esc(t)}</div></div>`).join('')}</div>
-        <div class="spacer"></div><button class="btn primary big" data-o="finish">Start my quest 🚀</button>`;
+      html = `${prog}<div class="center" style="margin-top:20px">${emblemSVG(A.emblem, A.color, 72)}</div><h1 class="center">You’re set, ${esc(A.name || 'player')}</h1>
+        <p class="center sub">Tip: after school, scan your papers in the School tab. MainQuest finds due dates and builds flashcards from them.</p>
+        <div class="spacer"></div><button class="btn primary big block" data-o="finish">Start</button>`;
     }
-    v.innerHTML = html;
-    v.onclick = null;
-    const keep = () => { const n = $('#ob-name'); if (n) A.name = n.value.trim(); const b = $('#ob-buddy'); if (b) A.buddyName = b.value.trim(); };
+    v.innerHTML = html; v.onclick = null;
+    const keep = () => { const n = $('#ob-name'); if (n) A.name = n.value.trim(); };
     v.querySelectorAll('[data-o]').forEach(btn => btn.onclick = async () => {
       keep(); const o = btn.dataset.o;
-      if (o === 'next') { this.quizStep++; return this.onboarding(); }
+      if (o === 'grade') { A.grade = +btn.dataset.k; return this.onboarding(); }
+      if (o === 'emb') { A.emblem = btn.dataset.k; return this.onboarding(); }
+      if (o === 'col') { A.color = btn.dataset.k; return this.onboarding(); }
+      if (o === 'next') { if (step === 0 && !A.grade) A.grade = S.player.grade || 5; this.quizStep++; return this.onboarding(); }
       if (o === 'back') { this.quizStep = Math.max(0, this.quizStep - 1); return this.onboarding(); }
       if (o === 'opt') {
         const q = QUIZ[step - 1]; const [val] = q.opts[+btn.dataset.i]; Sfx.play('tap'); buzz();
         if (q.multi) { const arr = A[q.k] || []; A[q.k] = arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val]; return this.onboarding(); }
-        A[q.k] = val; A[q.k + '_i'] = +btn.dataset.i; setTimeout(() => { this.quizStep++; this.onboarding(); }, 220); btn.classList.add('on'); return;
+        A[q.k] = val; A[q.k + '_i'] = +btn.dataset.i; btn.classList.add('on'); setTimeout(() => { this.quizStep++; this.onboarding(); }, 220); return;
       }
-      if (o === 'buddy') { A.buddy = btn.dataset.k; return this.onboarding(); }
       if (o === 'notif') { await Reminders.ask(); this.quizStep++; return this.onboarding(); }
-      if (o === 'addtask') { const i = $('#ob-task'); if (i.value.trim()) { A.tasks = A.tasks || []; A.tasks.push(i.value.trim()); } return this.onboarding(); }
+      if (o === 'assign') { S.player.grade = A.grade || 5; School.assignmentSheet(); const obs = new MutationObserver(() => { if ($('#sheet-wrap').hidden) { obs.disconnect(); if (!S.profile.onboarded) this.onboarding(); } }); obs.observe($('#sheet-wrap'), { attributes: true }); return; }
       if (o === 'finish') {
-        const i = $('#ob-task'); if (i && i.value.trim()) { A.tasks = A.tasks || []; A.tasks.push(i.value.trim()); }
-        const st = S.profile.style;
-        QUIZ.forEach(q => { if (A[q.k] !== undefined) st[q.k] = A[q.k]; });
-        S.profile.name = A.name || ''; S.profile.buddy = A.buddy || 'dragon'; S.profile.buddyName = A.buddyName || 'Sparky';
+        const st = S.profile.style; QUIZ.forEach(q => { if (A[q.k] !== undefined) st[q.k] = A[q.k]; });
+        Object.assign(S.player, { tag: A.name || S.player.tag || 'Player', grade: A.grade || S.player.grade || 5, emblem: A.emblem, color: A.color });
         S.profile.onboarded = true;
-        if (st.peak === 'unsure') S.profile.style.peak = 'unsure';
-        (A.tasks || []).forEach(t => { this.quickAddSilent(t); });
         const wasRetake = this._retake; this._retake = false;
-        if (!wasRetake) award(10); // welcome bonus — fast early wins
-        save(); this.tab = wasRetake ? 'me' : 'now'; this.render();
-        this.toast(wasRetake ? 'Style updated ✨' : `Welcome${S.profile.name ? ', ' + S.profile.name : ''}! +10 XP to start 🎉`); Sfx.play('done'); confetti(1);
+        if (!wasRetake) award(15);
+        save(); this.tab = wasRetake ? 'me' : 'home'; this.render();
+        this.toast(wasRetake ? 'Style updated' : 'Welcome in. +15 XP'); Sfx.play('done'); confetti(1);
       }
     });
-    const ti = $('#ob-task'); if (ti) { ti.onkeydown = e => { if (e.key === 'Enter') v.querySelector('[data-o=addtask]').click(); }; }
   },
   quickAddSilent(text) { const r = this.toast; this.toast = () => {}; try { this.quickAdd(text); } finally { this.toast = r; } },
 
-  /* ================================================================ Grown-up zone */
-  parentGate() {
+  /* ================================================================ Grown-up zone */  parentGate() {
     let entered = '';
     const setting = !S.settings.pin;
     const draw = () => this.sheet(`<div class="grab"></div><h3 class="center">🔒 Grown-up zone</h3>
@@ -626,9 +524,8 @@ const UI = {
     });
     draw();
   },
-
   async parentZone() {
-    const st = S.settings;
+    const st = S.settings; st.parentSeen = Date.now(); save({ noSchedule: true });
     const pending = S.redemptions.filter(r => r.status === 'pending');
     const wishes = S.wishes.filter(w => w.status === 'new');
     const wk = S.stats.sessions.filter(s => s.at > Date.now() - 7 * 864e5);
@@ -640,7 +537,7 @@ const UI = {
       <div class="card soft"><b>This week</b>
         <div class="grid3" style="margin-top:8px"><div class="stat"><b>${weekDone}</b><span class="faint">missions</span></div><div class="stat"><b>${goodDaysThisWeek()}</b><span class="faint">good days</span></div><div class="stat"><b>${fmtDur(wk.reduce((s, x) => s + x.actual, 0))}</b><span class="faint">focus</span></div></div>
         ${this.statsSummary().map(s => `<div class="sub" style="margin-top:6px">• ${esc(s)}</div>`).join('')}
-        <p class="faint" style="margin-top:8px">He can see this same summary on his Me tab. Praise effort and specific wins (“you started math without a reminder!”) — that builds motivation more than rewards do.</p></div>
+        <p class="faint" style="margin-top:8px">He sees this same summary — and when a grown-up last checked. Praise effort and specific wins (“you started math without a reminder!”) — that builds motivation more than rewards do.</p></div>
 
       <h2>💌 Send a note</h2>
       <div class="row"><input class="field grow" id="pz-note" placeholder="e.g. Proud of how you started homework today!"><button class="btn small gold" data-x="note">Send</button></div>
@@ -653,6 +550,16 @@ const UI = {
       ${S.rewards.map(r => `<div class="row" style="margin-bottom:6px"><input class="field" data-re="${r.id}" value="${esc(r.emoji)}" style="width:60px;text-align:center"><input class="field grow" data-rn="${r.id}" value="${esc(r.name)}"><input class="field" data-rc="${r.id}" type="number" value="${r.cost}" style="width:84px"><button class="iconbtn" data-x="rdel" data-id="${r.id}">🗑️</button></div>`).join('')}
       <div class="btn-row"><button class="btn small" data-x="radd">＋ Add reward</button><button class="btn small" data-x="rsave">💾 Save menu</button></div>
       <p class="faint">Roughly 10–20 coins per mission. Mix small daily rewards with bigger weekly ones; favor privileges and experiences.</p>
+
+      <h2>🎓 School</h2>
+      <label class="lbl">Grade (used for TEKS alignment)</label>
+      <div class="chips">${[5, 6, 7, 8, 9].map(g => `<button class="chip ${S.player.grade === g ? 'on' : ''}" data-x="grade" data-k="${g}">${g}th</button>`).join('')}</div>
+      <h2>✨ Study AI (reads scanned papers)</h2>
+      <div class="card soft sub">Turns photos of school papers into a summary, TEKS tags, flashcards and a practice quiz, using Claude through your own Anthropic API key (console.anthropic.com → API keys). Photos are sent to Anthropic only when he taps “Build study pack.” Typical cost: a few cents per paper. It is told never to answer the actual homework — it teaches the ideas and writes similar practice.</div>
+      <div class="list-btn" data-x="aion">Study AI enabled<span class="switch ${S.settings.ai.on ? 'on' : ''}" style="margin-left:auto"></span></div>
+      <input class="field" id="pz-key" type="password" value="${esc(S.settings.ai.key)}" placeholder="sk-ant-…" autocomplete="off">
+      <div class="chips" style="margin-top:8px">${[['claude-sonnet-5-5', 'Sonnet 5.5 (best)'], ['claude-haiku-5-5', 'Haiku 5.5 (cheaper)']].map(([m, l]) => `<button class="chip ${S.settings.ai.model === m ? 'on' : ''}" data-x="aimodel" data-k="${m}">${l}</button>`).join('')}</div>
+      <div class="btn-row"><button class="btn small" data-x="aisave">Save key</button><button class="btn small" data-x="aitest">Test connection</button></div>
 
       <h2>⏰ Schedule</h2>
       <label class="lbl">Bedtime</label><input class="field" type="time" id="pz-bed" value="${st.bedtime}">
@@ -688,6 +595,16 @@ const UI = {
           if (x === 'radd') S.rewards.push({ id: uid(), emoji: '🎁', name: 'New reward', cost: 80 });
           S.rewardsUpdated = Date.now(); save({ noSchedule: true }); if (x === 'rsave') this.toast('Reward menu saved'); this.parentZone();
         }
+        if (x === 'grade') { S.player.grade = +b.dataset.k; save({ noSchedule: true }); $$('[data-x=grade]', root).forEach(c => c.classList.toggle('on', c === b)); }
+        if (x === 'aion') { S.settings.ai.on = !S.settings.ai.on; b.querySelector('.switch').classList.toggle('on', S.settings.ai.on); save({ noSchedule: true }); }
+        if (x === 'aimodel') { S.settings.ai.model = b.dataset.k; $$('[data-x=aimodel]', root).forEach(c => c.classList.toggle('on', c === b)); save({ noSchedule: true }); }
+        if (x === 'aisave') { S.settings.ai.key = $('#pz-key', root).value.trim(); if (S.settings.ai.key) S.settings.ai.on = true; save({ noSchedule: true }); this.toast('Key saved on this phone'); this.parentZone(); }
+        if (x === 'aitest') {
+          const key = $('#pz-key', root).value.trim(); if (!key) return this.toast('Paste a key first');
+          this.toast('Testing…');
+          try { const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: S.settings.ai.model, max_tokens: 10, messages: [{ role: 'user', content: 'Reply OK' }] }) });
+            this.toast(r.ok ? 'Connected ✓' : r.status === 401 ? 'Key rejected (401)' : r.status === 404 ? 'Model not found — try the other model' : 'Error ' + r.status); } catch (err) { this.toast('No connection'); }
+        }
         if (x === 'tschool') { st.schoolQuiet = !st.schoolQuiet; b.querySelector('.switch').classList.toggle('on', st.schoolQuiet); }
         if (x === 'goal') { st.weekGoal = +b.dataset.k; $$('[data-x=goal]', root).forEach(c => c.classList.toggle('on', c === b)); }
         if (x === 'ssave') {
@@ -707,7 +624,6 @@ const UI = {
       };
     });
   },
-
   async exportData() {
     const json = JSON.stringify(S, null, 1); const name = `mainquest-backup-${today()}.json`;
     try {
@@ -719,6 +635,127 @@ const UI = {
   },
 
   /* ================================================================ Global click router */
+  view_home() {
+    const q = todayQueue();
+    const r = routineActive();
+    let main = '';
+    if (S.focus) {
+      const t = Focus.task();
+      main = `<div class="now-card"><div class="now-label">In progress</div><div class="now-title"><span class="em">${esc(t ? t.emoji : '🎯')}</span><span>${esc(t ? t.title : '')}</span></div>
+        <button class="btn primary big" data-a="resumeFocus">Jump back in</button></div>`;
+    } else if (r) {
+      const done = r.log[today()] || []; const item = r.items.find(i => !done.includes(i.id));
+      main = `<div class="now-card"><div class="now-label">${esc(r.name)} · ${done.length}/${r.items.length}</div>
+        <div class="now-title"><span class="em">${esc(item.emoji)}</span><span>${esc(item.text)}</span></div>
+        <div class="bar" style="margin:8px 0 14px"><i style="width:${done.length / r.items.length * 100}%"></i></div>
+        <button class="btn primary big" data-a="rtItem" data-r="${r.id}" data-i="${item.id}">${item.action === 'scan' ? '📸 Scan now' : 'Done'}</button>
+        <div class="btn-row"><button class="btn small" data-a="openRoutine" data-r="${r.id}">All steps</button><button class="btn small ghost" data-a="skipRoutine" data-r="${r.id}">Not now</button></div></div>`;
+    } else if (q.length) {
+      const t = q[0];
+      const firstStep = (t.steps || []).find(s => !s.done);
+      const a = t.assignmentId && S.assignments.find(x => x.id === t.assignmentId);
+      main = `<div class="now-card ${a && a.maxHp ? 'boss' : ''}">
+        <div class="now-label">${a && a.maxHp ? `⚔️ vs ${esc(a.boss)}` : t.kind === 'study' ? 'Study' : 'Your mission'}${t.time ? ' · ' + fmtHM(t.time) : ''}${a ? ` · due ${dueLc(a.due)}` : ''}</div>
+        <div class="now-title"><span class="em">${esc(t.emoji)}</span><span>${esc(t.title)}</span></div>
+        ${a && a.maxHp ? `<div class="hp" style="margin:4px 0 8px"><i style="width:${(a.hp / a.maxHp * 100).toFixed(0)}%"></i></div>` : ''}
+        ${t.anchor ? `<div class="sub">${esc(anchorText(t.anchor))} → then this.</div>` : ''}
+        <div class="now-step">${firstStep ? `First step: <b>${esc(firstStep.text)}</b>` : `<button class="chip" data-a="chop" data-id="${t.id}">Break it into steps</button>`}${carriedDays(t) ? ` <span class="pill">Carried over</span>` : ''}</div>
+        <button class="btn primary big" data-a="start" data-id="${t.id}">▶ Start</button>
+        <div class="btn-row">
+          <button class="btn small" data-a="quickDone" data-id="${t.id}">Done</button>
+          <button class="btn small" data-a="notNow" data-id="${t.id}">Not now</button>
+          ${S.profile.style.start === 'spin' && q.length > 1 ? `<button class="btn small" data-a="spin">🎲 Spin</button>` : `<button class="btn small" data-a="stuckNow" data-id="${t.id}">Stuck</button>`}
+        </div></div>`;
+    } else {
+      main = `<div class="now-card now-empty"><div class="now-title" style="justify-content:center">All clear</div>
+        <p class="sub">${esc(pick(LINES.hello))}</p>
+        <div class="quickadd"><input id="qa-now" placeholder="Add a mission…" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-a="qaNow" aria-label="Add">＋</button></div>
+        <div class="btn-row"><button class="btn small" data-a="plan">Plan my day</button><button class="btn small" data-a="tab" data-t="calendar">Calendar</button></div></div>`;
+    }
+    const rest = q.slice(r || S.focus ? 0 : 1, (r || S.focus ? 0 : 1) + 3);
+    const note = S.notes.find(n => !n.read);
+    const tip = this.dailyTip();
+    const insights = this.insights();
+    const later = S.tasks.filter(t => !t.done && t.when === 'later').length;
+    return `
+      ${main}
+      ${rest.length ? `<div class="list-head"><span>Up next</span>${q.length > rest.length + 1 ? `<span class="faint">+${q.length - rest.length - 1} more</span>` : ''}</div>${rest.map(t => `<div class="task" data-a="openTask" data-id="${t.id}"><span class="em">${esc(t.emoji)}</span><div class="grow"><div class="t">${esc(t.title)}</div>${t.time ? `<div class="meta">${fmtHM(t.time)}</div>` : ''}</div><button class="iconbtn" data-a="start" data-id="${t.id}" aria-label="Start">▶</button></div>`).join('')}` : ''}
+      <div class="quickadd" style="margin-top:10px"><input id="qa" placeholder="Add a mission — “math at 4pm”" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-a="qa" aria-label="Add">＋</button></div>
+      ${School.dueSoonHTML()}
+      ${note ? `<div class="card" style="border-color:var(--gold)"><div class="faint">Message from ${esc(note.from || 'Dad')}</div><div style="font-size:18px;font-weight:600;margin:6px 0 10px">${esc(note.text)}</div><button class="btn small gold" data-a="readNote" data-id="${note.id}">Got it</button></div>` : ''}
+      ${this.challengesCard()}
+      ${openAssignments().filter(a => a.maxHp && !a.defeated).slice(0, 2).map(a => School.bossCard(a)).join('')}
+      ${this.timeBudget(q)}
+      ${insights.slice(0, 1).map(i => `<div class="card soft"><div class="faint">Noticed something</div><div style="margin:6px 0 10px">${esc(i.text)}</div>${i.btn ? `<button class="btn small" data-a="insight" data-k="${i.id}">${esc(i.btn)}</button>` : ''}</div>`).join('')}
+      ${tip ? `<div class="card tip"><div class="faint">Pro tip</div><b style="font-size:17px">${esc(tip.t)}</b><p class="sub" style="margin:6px 0 10px">${esc(tip.d)}</p>
+        <div class="row">${tip.task ? `<button class="btn small" data-a="tipTask" data-k="${tip.id}">＋ Make it a mission</button>` : `<button class="btn small" data-a="tipLike" data-k="${tip.id}">I’ll try it</button>`}<button class="btn small ghost" data-a="tipHide" data-k="${tip.id}">Not for me</button></div></div>` : ''}
+      <div class="row wrap" style="gap:8px;margin-top:6px">
+        ${S.parking.length ? `<button class="btn small ghost" data-a="parking">🅿️ Parking lot · ${S.parking.length}</button>` : ''}
+        ${later ? `<button class="btn small ghost" data-a="backlog">Later · ${later}</button>` : ''}
+        <button class="btn small ghost" data-a="plan">Plan my day</button>
+      </div>`;
+  },
+
+  challengesCard() {
+    const w = S.weekly;
+    if (!w.picked.length) return `<div class="card chall"><div class="row"><div class="grow"><b>Weekly challenges</b><div class="faint">Pick 3 of 5. Each one = +100 season XP.</div></div><button class="btn small primary" data-a="pickChallenges">Pick</button></div></div>`;
+    return `<div class="card chall"><div class="row" style="justify-content:space-between"><b>This week</b><span class="faint">resets Monday</span></div>
+      ${w.picked.map(id => { const c = CHALLENGE_POOL.find(x => x.id === id); if (!c) return ''; const p = Math.min(c.goal, Math.round(w.progress[id] || 0)); const done = w.done.includes(id);
+        return `<div class="ch-row ${done ? 'done' : ''}"><span class="grow">${done ? '✓ ' : ''}${esc(c.name)}</span><span class="faint">${p}/${c.goal}</span></div><div class="bar thin"><i style="width:${p / c.goal * 100}%"></i></div>`; }).join('')}</div>`;
+  },
+
+  pickChallenges() {
+    ensureWeekly(); const sel = new Set(S.weekly.picked);
+    const draw = () => this.sheet(`<div class="grab"></div><h3>Pick 3 challenges</h3><p class="sub">Your call. Pick ones that fit your week.</p>
+      ${S.weekly.offered.map(id => { const c = CHALLENGE_POOL.find(x => x.id === id); return `<button class="list-btn ${sel.has(id) ? 'on' : ''}" data-x="t" data-k="${id}"><span class="check ${sel.has(id) ? 'on' : ''}">${sel.has(id) ? '✓' : ''}</span>${esc(c.name)}</button>`; }).join('')}
+      <div class="spacer"></div><button class="btn primary block" data-x="ok" ${sel.size === 3 ? '' : 'disabled'}>Lock in (${sel.size}/3)</button>`, root => {
+      root.onclick = e => { const b = e.target.closest('[data-x]'); if (!b) return;
+        if (b.dataset.x === 't') { const k = b.dataset.k; if (sel.has(k)) sel.delete(k); else if (sel.size < 3) sel.add(k); return draw(); }
+        if (b.dataset.x === 'ok') { S.weekly.picked = [...sel]; save({ noSchedule: true }); this.closeSheet(); this.render(); this.toast('Challenges locked in'); } };
+    });
+    draw();
+  },
+
+  /* ================================================================ PROFILE */
+  customize() {
+    const P = S.player;
+    const draw = () => this.sheet(`<div class="grab"></div><h3>Customize</h3>
+      <label class="lbl">Gamertag</label><input class="field" id="cz-tag" value="${esc(P.tag)}" maxlength="18">
+      <label class="lbl">Emblem</label><div class="emb-grid">${Object.keys(EMBLEMS).map(k => `<button class="emb ${P.emblem === k ? 'on' : ''}" data-x="emb" data-k="${k}">${emblemSVG(k, P.color, 40, false)}</button>`).join('')}</div>
+      <label class="lbl">Color</label><div class="chips">${S.unlocked.colors.map(c => `<button class="swatch-btn ${P.color === c ? 'on' : ''}" data-x="col" data-k="${c}" style="background:${c}" aria-label="color"></button>`).join('')}${EMBLEM_COLORS.filter(c => !S.unlocked.colors.includes(c)).map(() => `<span class="swatch-btn locked">🔒</span>`).join('')}</div>
+      <label class="lbl">Banner</label><div class="ban-grid">${BANNERS.map(b => { const has = S.unlocked.banners.includes(b.id); return `<button class="ban ${P.banner === b.id ? 'on' : ''}" data-x="ban" data-k="${b.id}" style="background:${b.css}" ${has ? '' : 'disabled'}><span>${has ? esc(b.name) : '🔒 ' + (b.season ? 'Season tier ' + b.season : 'Level ' + b.level)}</span></button>`; }).join('')}</div>
+      <label class="lbl">Title</label><div class="chips">${TITLES.map(t => S.unlocked.titles.includes(t.id) ? `<button class="chip ${P.title === t.id ? 'on' : ''}" data-x="title" data-k="${t.id}">${esc(t.name)}</button>` : `<span class="chip" style="opacity:.45">🔒 ${esc(t.name)}</span>`).join('')}</div>
+      <label class="lbl">App theme</label><div class="chips">${THEMES.map(t => S.unlocked.themes.includes(t.id) ? `<button class="chip ${P.theme === t.id ? 'on' : ''}" data-x="theme" data-k="${t.id}"><i class="swatch" style="background:${t.accent}"></i>${t.name}</button>` : `<span class="chip" style="opacity:.45">🔒 ${t.name} · ${t.level ? 'Lv ' + t.level : 'Season'}</span>`).join('')}</div>
+      <div class="spacer"></div><button class="btn primary block" data-x="done">Done</button>`, root => {
+      root.onclick = e => {
+        const b = e.target.closest('[data-x]'); if (!b) return; const k = b.dataset.k; P.tag = $('#cz-tag', root).value.trim() || P.tag;
+        if (b.dataset.x === 'emb') P.emblem = k; if (b.dataset.x === 'col') P.color = k; if (b.dataset.x === 'ban') P.banner = k; if (b.dataset.x === 'title') P.title = k; if (b.dataset.x === 'theme') P.theme = k;
+        save({ noSchedule: true });
+        if (b.dataset.x === 'done') { this.closeSheet(); this.render(); return; }
+        this.render(); draw();
+      };
+    });
+    draw();
+  },
+
+  achievement(a, t) {
+    if (!a) return;
+    Sfx.play('level'); buzz('success');
+    this.toast(`Achievement: ${a.name}${t ? ` · title “${t.name}” unlocked` : ''}`, null, null, 3800);
+  },
+
+  backlogSheet() {
+    const later = S.tasks.filter(t => !t.done && t.when === 'later');
+    this.sheet(`<div class="grab"></div><h3>Later</h3><p class="sub">Parked so Today stays clean. Pull back what still matters.</p>
+      ${later.map(t => `<div class="task"><span class="em">${esc(t.emoji)}</span><div class="grow t" style="font-size:16px">${esc(t.title)}</div><button class="btn small" data-x="today" data-id="${t.id}">Today</button><button class="iconbtn" data-x="del" data-id="${t.id}" aria-label="Delete">🗑️</button></div>`).join('')}
+      <div class="spacer"></div><button class="btn block" data-x="close">Close</button>`, root => root.onclick = e => {
+      const b = e.target.closest('[data-x]'); if (!b) return; const t = S.tasks.find(x => x.id === b.dataset.id);
+      if (b.dataset.x === 'today') { t.when = 'today'; t.date = today(); t.parkedAuto = false; save(); }
+      if (b.dataset.x === 'del') { S.tasks = S.tasks.filter(x => x !== t); save(); }
+      if (b.dataset.x === 'close') { this.closeSheet(); this.render(); return; }
+      this.backlogSheet();
+    });
+  },
   async onClick(e) {
     const el = e.target.closest('[data-a],[data-tab]'); if (!el) return;
     if (el.dataset.tab) { Sfx.play('tap'); return this.go(el.dataset.tab); }
@@ -730,54 +767,69 @@ const UI = {
       case 'resumeFocus': return Focus.render();
       case 'quickDone': return this.finishQuick(t);
       case 'undo': t.done = false; t.doneAt = null; save(); return this.render();
-      case 'notNow': { this.closeSheet(); t.pin = 0; t.defer = today(); t.deferAt = Date.now(); save(); this.render(); return this.toast('No problem — moved it back. Next one!'); }
-      case 'spin': { const q = todayQueue(); const p = pick(q.slice(0, Math.min(3, q.length))); S.tasks.forEach(o => o.pin = 0); p.pin = 1; save(); Sfx.play('coin'); this.render(); return this.toast(`🎲 The wheel picked: ${p.title}`); }
-      case 'stuckNow': return this.sheet(`<div class="grab"></div><h3>😵 Stuck on “${esc(t.title)}”?</h3>
-          <button class="list-btn" data-a="chop" data-id="${t.id}"><span class="em">🔪</span>Chop it into tiny steps<span class="chev">›</span></button>
+      case 'notNow': { this.closeSheet(); t.pin = 0; t.defer = today(); t.deferAt = Date.now(); save(); this.render(); return this.toast('Moved back. Next one.'); }
+      case 'spin': { const q = todayQueue(); const p = pick(q.slice(0, Math.min(3, q.length))); S.tasks.forEach(o => o.pin = 0); p.pin = 1; save(); Sfx.play('coin'); this.render(); return this.toast(`🎲 Picked: ${p.title}`); }
+      case 'stuckNow': return this.sheet(`<div class="grab"></div><h3>Stuck on “${esc(t.title)}”?</h3>
+          <button class="list-btn" data-a="chop" data-id="${t.id}"><span class="em">🔪</span>Break it into small steps<span class="chev">›</span></button>
           <button class="list-btn" data-a="two" data-id="${t.id}"><span class="em">⏱️</span>Just do 2 minutes<span class="chev">›</span></button>
           <button class="list-btn" data-a="notNow" data-id="${t.id}"><span class="em">⏭</span>Do a different one first<span class="chev">›</span></button>
-          <button class="list-btn" data-a="park" ><span class="em">🙋</span>Write down what I need help with<span class="chev">›</span></button>`, root => root.onclick = ev => { this.closeSheet(); this.onClick(ev); });
+          <button class="list-btn" data-a="park"><span class="em">🙋</span>Write down what I need help with<span class="chev">›</span></button>`, root => root.onclick = ev => { this.closeSheet(); this.onClick(ev); });
       case 'two': this.closeSheet(); return Focus.start(id, 2, 'mini');
-      case 'chop': t.steps = (t.steps || []).filter(s => s.done).concat(suggestSteps(t.title, false).map(text => ({ id: uid(), text, done: false }))); save(); this.render(); return this.toast('Chopped! Tap a mission to edit the steps.');
+      case 'chop': t.steps = (t.steps || []).filter(s => s.done).concat(suggestSteps(t.title, false).map(text => ({ id: uid(), text, done: false }))); save(); this.render(); return this.toast('Broken into steps. Tap the mission to edit them.');
       case 'openTask': return this.taskSheet(t);
-      case 'qa': { const i = $('#qa'); this.quickAdd(i.value); return; }
-      case 'qaNow': { const i = $('#qa-now'); this.quickAdd(i.value); return; }
+      case 'qa': return this.quickAdd($('#qa').value);
+      case 'qaNow': return this.quickAdd($('#qa-now').value);
       case 'mic': return this.mic();
-      case 'plan': return this.planSheet();
-      case 'rtItem': { const r = S.routines.find(x => x.id === el.dataset.r); this.toggleRoutineItem(r, el.dataset.i); return this.render(); }
+      case 'plan': track('plan'); return this.planSheet();
+      case 'backlog': return this.backlogSheet();
+      case 'rtItem': { const r = S.routines.find(x => x.id === el.dataset.r); const it = r.items.find(i => i.id === el.dataset.i); if (it && it.action === 'scan') return School.scan(); this.toggleRoutineItem(r, el.dataset.i); return this.render(); }
       case 'openRoutine': return this.openRoutine(el.dataset.r);
       case 'skipRoutine': { const r = S.routines.find(x => x.id === el.dataset.r); r.skipped = today(); save({ noSchedule: true }); return this.render(); }
       case 'newRoutine': return this.editRoutine(null);
       case 'readNote': { const n = S.notes.find(x => x.id === id); n.read = true; save({ noSchedule: true }); Sfx.play('coin'); return this.render(); }
-      case 'tipLike': S.tips.liked.push(el.dataset.k); S.tips.current = ''; save({ noSchedule: true }); this.toast('Nice — give it a try today 👍'); return this.render();
-      case 'tipHide': S.tips.hidden.push(el.dataset.k); S.tips.current = ''; save({ noSchedule: true }); this.toast('Got it — I’ll show you different tips'); return this.render();
+      case 'tipLike': S.tips.liked.push(el.dataset.k); S.tips.current = ''; save({ noSchedule: true }); this.toast('Try it today'); return this.render();
+      case 'tipHide': S.tips.hidden.push(el.dataset.k); S.tips.current = ''; save({ noSchedule: true }); this.toast('Got it — different tips from now on'); return this.render();
       case 'tipTask': { const tip = TIPS.find(x => x.id === el.dataset.k); S.tasks.push(newTask(tip.task)); S.tips.liked.push(tip.id); S.tips.current = ''; save(); this.toast('Added as a mission'); return this.render(); }
       case 'insight': {
         const ins = this.insights().find(i => i.id === el.dataset.k); if (!ins) return;
         const st = S.profile.style;
-        if (ins.id === 'sprint-up') { S.tips.seen['ins-sprint-' + st.sprint] = 1; st.sprint += 5; this.toast(`Sprints are now ${st.sprint} min. You can always change back.`); }
+        if (ins.id === 'sprint-up') { S.tips.seen['ins-sprint-' + st.sprint] = 1; st.sprint += 5; this.toast(`Sprints are now ${st.sprint} min.`); }
         if (ins.id === 'sprint-down') { S.tips.seen['ins-sprint-' + st.sprint] = 1; st.sprint -= 5; this.toast(`Sprints are now ${st.sprint} min. Short + done beats long + stuck.`); }
-        if (ins.id === 'peak') { S.tips.seen['ins-peak-' + ins.key] = 1; st.peak = ins.key; this.toast('Power hour updated ⚡'); }
+        if (ins.id === 'peak') { S.tips.seen['ins-peak-' + ins.key] = 1; st.peak = ins.key; this.toast('Power hour updated'); }
         if (ins.id === 'park') { S.tips.seen['ins-park-' + today()] = 1; save({ noSchedule: true }); return this.parkSheet(); }
-        if (ins.id === 'parked') { S.tasks.forEach(x => { if (x.parkedAuto) x.parkSeen = true; }); save(); return this.go('missions'); }
+        if (ins.id === 'parked') { S.tasks.forEach(x => { if (x.parkedAuto) x.parkSeen = true; }); save(); return this.backlogSheet(); }
         save({ noSchedule: true }); return this.render();
       }
       case 'parking': case 'park': return this.parkSheet();
+      case 'pickChallenges': return this.pickChallenges();
+      case 'claim': { const msg = claimSeasonTier(+el.dataset.k); if (msg) { Sfx.play('level'); confetti(1); this.toast('Unlocked: ' + msg); this.render(); } return; }
+      case 'customize': return this.customize();
       case 'redeem': {
         const r = S.rewards.find(x => x.id === id); if (S.stats.coins < r.cost) return;
-        if (!(await ask(`Spend ${r.cost} coins on “${r.name}”?`, { ok: 'Spend 🪙' }))) return;
+        if (!(await ask(`Spend ${r.cost} coins on “${r.name}”?`, { ok: 'Redeem' }))) return;
         S.stats.coins -= r.cost; S.redemptions.unshift({ id: uid(), rewardId: r.id, name: r.name, emoji: r.emoji, cost: r.cost, at: Date.now(), status: 'pending' });
-        save({ noSchedule: true }); Sfx.play('level'); confetti(1); this.render(); return this.toast('🎉 Requested! Show a grown-up to get it.');
+        save({ noSchedule: true }); Sfx.play('level'); confetti(1); this.render(); return this.toast('Requested. Show a grown-up to collect.');
       }
-      case 'wish': { const w = await ask('What reward would you love? A grown-up will set the price.', { input: true, placeholder: 'e.g. trip to the trampoline park', ok: 'Send wish' }); if (w && w.trim()) { S.wishes.push({ id: uid(), text: w.trim(), at: Date.now(), status: 'new' }); save({ noSchedule: true }); this.toast('Wish sent 💭'); } return; }
-      case 'theme': S.profile.theme = id; save({ noSchedule: true }); return this.render();
-      case 'retake': S.profile.onboarded = false; this.quizStep = 1; this.quizAns = { name: S.profile.name, buddy: S.profile.buddy, buddyName: S.profile.buddyName, tasks: [] }; this._retake = true; return this.render();
+      case 'wish': { const w = await ask('What reward would you want? A grown-up sets the price.', { input: true, placeholder: 'e.g. trampoline park trip', ok: 'Send' }); if (w && w.trim()) { S.wishes.push({ id: uid(), text: w.trim(), at: Date.now(), status: 'new' }); save({ noSchedule: true }); this.toast('Sent'); } return; }
+      case 'retake': S.profile.onboarded = false; this.quizStep = 1; this.quizAns = { name: S.player.tag, grade: S.player.grade, emblem: S.player.emblem, color: S.player.color }; this._retake = true; return this.render();
       case 'toggle': S.settings[el.dataset.k] = !S.settings[el.dataset.k]; save({ noSchedule: true }); return this.render();
       case 'checkins': { const order = ['gentle', 'normal', 'off']; S.settings.checkins = order[(order.indexOf(S.settings.checkins) + 1) % 3]; save({ noSchedule: true }); return this.render(); }
-      case 'notifs': { const p = await Reminders.ask(); this.toast(p === 'granted' ? '🔔 Reminders are on' : 'Reminders are off — a grown-up can turn them on in phone Settings'); return; }
+      case 'notifs': { const p = await Reminders.ask(); this.toast(p === 'granted' ? 'Reminders are on' : 'Reminders are off — turn them on in phone Settings'); return; }
       case 'parent': return this.parentGate();
+      // School + calendar
+      case 'seg': School.seg = el.dataset.k; return this.render();
+      case 'scan': return School.scan();
+      case 'newAssignment': return School.assignmentSheet();
+      case 'openAssignment': { const as = S.assignments.find(x => x.id === id); return as && School.assignmentDetail(as); }
+      case 'openPaper': { const p = S.papers.find(x => x.id === id); return p && School.paperSheet(p); }
+      case 'cards': return School.flashcards(S.papers.find(x => x.id === id));
+      case 'quiz': return School.quiz(S.papers.find(x => x.id === id));
+      case 'calDay': Cal.sel = el.dataset.k; Sfx.play('tap'); return this.render();
+      case 'calNav': Cal.month = new Date(Cal.month.getFullYear(), Cal.month.getMonth() + +el.dataset.k, 1); return this.render();
+      case 'calToday': { const d = new Date(); Cal.month = new Date(d.getFullYear(), d.getMonth(), 1); Cal.sel = today(); return this.render(); }
+      case 'calAdd': return Cal.add(el.dataset.k, Cal.sel);
+      case 'editEvent': return Cal.eventSheet(S.events.find(x => x.id === id));
     }
   },
 };
 
-function fmt24(d) { return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
