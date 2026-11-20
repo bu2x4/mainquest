@@ -34,6 +34,26 @@ Turn it off any time; every setting is kept. To change what a *fresh install* st
 
 Photos go to the endpoint only when he taps "Build study pack": the paper's pages, his grade, and that grade's TEKS list. No name or account is sent.
 
+## Google Calendar sync (send + receive invites)
+MainQuest syncs through the **phone's own calendar**, which Android keeps in two-way sync with the Google account signed in on the phone. There's no Google Cloud project, OAuth setup, or extra key. It works with a Family Link account and keeps working offline; changes sync when the phone is back online.
+
+**Set up** (Profile → Grown-up zone → Google Calendar sync):
+1. Make sure his Google account is on the phone (Android Settings → Accounts) with **Calendar** sync on.
+2. Tap **Connect phone calendars** and allow calendar access.
+3. Pick which calendars **show in MainQuest** (his calendar, family, school, holidays…) and which one MainQuest **saves to**.
+4. Choose what to **send to Google:** his events (on), due dates + tests as all-day events (on), study sessions (off).
+5. **Sending invites:** Off / **Approved contacts only** (default; you add names + emails) / Anyone. Every invite he sends is listed under "Invites he sent."
+
+**What he gets:**
+- **Invites:** new invites show on Home with **Yes / Maybe / No**. His reply goes to the organizer through Google. A notification appears when a new one arrives.
+- **Calendar:** Google events appear in Calendar (colored by calendar), the planner, the "Next:" bar, and 30-minute heads-up reminders (can be turned off).
+- **Sending invites:** when he creates an event he can add guests. Google emails them a normal invite when the phone syncs, and their replies (going / maybe / not going) show on the event.
+- **Two-way edits:** if someone moves or renames a MainQuest event in Google Calendar, it updates in MainQuest. Deleting it in either place removes it in both.
+
+Sync runs when the app opens or returns to the foreground, after every change, and every 10 minutes while open. The Android calendar itself syncs with Google in the background. Use **Test without Google** to try the flow with a phone-only test calendar.
+
+**Note:** a school (Google Workspace for Education) account may have calendar sharing or invites to outside people restricted by the district. A personal or Family Link account has no such limits.
+
 ## Planning ahead (rolling 7 days)
 **Plan ahead** (Home) opens a 7-day strip starting today. Tap a day or use ‹ › to cycle through. For any day you can:
 - see what's fixed (events, tests and due items, routines);

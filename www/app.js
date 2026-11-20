@@ -32,7 +32,7 @@
 
   document.addEventListener('visibilitychange', () => {
     Focus.onVisibility();
-    if (!document.hidden) { tidyBacklog(); if ($('#sheet-wrap').hidden) UI.render(); Reminders.tick(); Reminders.sync(); }
+    if (!document.hidden) { tidyBacklog(); if ($('#sheet-wrap').hidden) UI.render(); Reminders.tick(); Reminders.sync(); GSync.sync('resume'); }
   });
 
   // Web/PWA: service worker for offline + notifications.
@@ -57,4 +57,6 @@
 
   await Reminders.init();
   Reminders.tick();
+  GSync.sync('boot');
+  setInterval(() => { if (!document.hidden) GSync.sync('timer'); }, 10 * 60e3);
 })();

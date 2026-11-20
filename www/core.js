@@ -46,8 +46,10 @@ function freshState() {
     settings: { bedtime: '21:00', schoolQuiet: true, schoolStart: '07:55', schoolEnd: '15:10', checkins: 'gentle',
       sound: true, haptics: true, calm: false, light: false, bigtext: false, dyslexic: false, weekGoal: 4, pin: '',
       anchors: { afterschool: '15:45', aftersnack: '16:15', afterdinner: '18:45' },
+      gcal: { on: false, connected: false, cals: [], readIds: [], writeId: '', pushEvents: true, pushDue: true, pushStudy: false, remind: true, invites: 'approved', contacts: [], lastSync: 0, lastError: '' },
       ai: { on: !!APP_CONFIG.ai.enabled, key: '', model: APP_CONFIG.ai.model, endpoint: APP_CONFIG.ai.endpoint, apiVersion: APP_CONFIG.ai.apiVersion,
         maxPages: APP_CONFIG.ai.maxPages, monthlyLimit: APP_CONFIG.ai.monthlyLimit, usage: { month: '', builds: 0 }, lastTest: null }, parentSeen: 0 },
+    gevents: [], gseen: {}, gdeletes: [],
     focus: null, fired: {},
   };
 }
@@ -63,7 +65,7 @@ function migrate(s) {
   out.player = { ...f.player, ...s.player };
   if (!s.player && s.profile && s.profile.name) out.player.tag = s.profile.name;
   out.stats = { ...f.stats, ...s.stats };
-  out.settings = { ...f.settings, ...s.settings, anchors: { ...f.settings.anchors, ...((s.settings || {}).anchors) }, ai: { ...f.settings.ai, ...((s.settings || {}).ai) } };
+  out.settings = { ...f.settings, ...s.settings, anchors: { ...f.settings.anchors, ...((s.settings || {}).anchors) }, ai: { ...f.settings.ai, ...((s.settings || {}).ai) }, gcal: { ...f.settings.gcal, ...((s.settings || {}).gcal) } };
   out.unlocked = { ...f.unlocked, ...s.unlocked };
   out.tips = { ...f.tips, ...s.tips };
   out.season = { ...f.season, ...s.season }; out.weekly = { ...f.weekly, ...s.weekly };
@@ -354,6 +356,7 @@ const PROJECT_STEPS = ['Read the requirements + make a checklist', 'Gather mater
 function anchorTime(k) { return k === 'beforebed' ? fmt24(new Date(+atTime(S.settings.bedtime) - 75 * 60e3)) : (S.settings.anchors[k] || '16:00'); }
 function dayLoad(dk) { return S.tasks.filter(t => !t.done && t.date === dk).length + S.events.filter(e => e.date === dk && e.time).length; }
 function planAssignment(a) {
+  S.tasks.filter(t => t.assignmentId === a.id && !t.done && t.auto && t.gcalId).forEach(t => (S.gdeletes = S.gdeletes || []).push(t.gcalId));
   S.tasks = S.tasks.filter(t => !(t.assignmentId === a.id && !t.done && t.auto));
   const due = new Date(a.due + 'T12:00:00'); const now = new Date(); now.setHours(12, 0, 0, 0);
   const daysUntil = Math.round((due - now) / 864e5);
@@ -441,6 +444,7 @@ function itemsOn(dk) {
   return {
     events: S.events.filter(e => e.date === dk).sort((a, b) => (a.time || '99') < (b.time || '99') ? -1 : 1),
     due: S.assignments.filter(a => a.due === dk),
+    google: (typeof GSync !== 'undefined') ? GSync.onDay(dk) : [],
     tasks: S.tasks.filter(t => t.date === dk).sort((a, b) => (a.time || '99') < (b.time || '99') ? -1 : 1),
   };
 }
@@ -453,6 +457,7 @@ function upcomingEvents(from = new Date(), horizonH = 30) {
     S.routines.forEach(r => { if (!r.days.includes(wd)) return; if ((r.log[dk] || []).length >= r.items.length) return; ev.push({ kind: 'routine', id: r.id, at: atTime(r.time, base), title: r.name, emoji: r.emoji }); });
     S.tasks.forEach(t => { if (t.done || !t.time || t.when === 'later') return; const td = taskDate(t); const eff = td < today() ? today() : td; if (eff !== dk) return; ev.push({ kind: 'task', id: t.id, at: atTime(t.time, base), title: t.title, emoji: t.emoji }); });
     S.events.forEach(e => { if (e.date !== dk || !e.time) return; ev.push({ kind: 'event', id: e.id, at: atTime(e.time, base), title: e.title, emoji: e.emoji || '📅' }); });
+    (S.gevents || []).forEach(g => { if (g.date !== dk || !g.time || g.selfStatus === 'declined') return; ev.push({ kind: 'gevent', id: g.key, at: new Date(g.start), title: g.title, emoji: '📅' }); });
     ev.push({ kind: 'bed', at: atTime(S.settings.bedtime, base), title: 'Bedtime', emoji: '😴' });
   }
   return ev.filter(e => e.at > from && e.at < end).sort((a, b) => a.at - b.at);
@@ -514,6 +519,11 @@ const Reminders = {
       if (!e.time || e.noRemind) return;
       const at = atTime(e.time, new Date(e.date + 'T00:00:00'));
       push({ key: `ev-${e.id}`, at: new Date(+at - 30 * 60e3), title: `${e.title} in 30 min`, body: e.where ? `At ${e.where}. Time to get ready.` : 'Time to get ready.', kind: 'event', channel: 'routines' });
+    });
+    if (S.settings.gcal.on && S.settings.gcal.remind) (S.gevents || []).forEach(g => {
+      if (g.allDay || g.selfStatus === 'declined') return;
+      const at = new Date(g.start - 30 * 60e3); if (inSchoolQuiet(at)) return;
+      push({ key: `g-${g.key}`, at, title: `${g.title} in 30 min`, body: g.location ? `At ${g.location}. Time to get ready.` : 'Time to get ready.', kind: 'event', channel: 'routines' });
     });
     out.sort((a, b) => a.at - b.at);
     return out.slice(0, 150);

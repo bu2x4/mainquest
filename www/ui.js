@@ -374,7 +374,7 @@ const UI = {
         if (x === 'save') { t.parkSeen = true; this.saveTask(t); this.closeSheet(); this.render(); this.toast('Saved'); }
         if (x === 'next') { t.when = 'today'; t.date = today(); S.tasks.forEach(o => { o.pin = 0; }); t.pin = 1; this.saveTask(t); this.closeSheet(); this.render(); this.toast('Up next ⬆️'); }
         if (x === 'start') { if (t.when === 'later' || (t.date && t.date > today())) { t.when = 'today'; t.date = today(); } this.saveTask(t); this.closeSheet(); Focus.preflight(t.id); }
-        if (x === 'delete') { const copy = { ...t }; S.tasks = S.tasks.filter(o => o.id !== t.id); save(); this.closeSheet(); this.render(); this.toast('Deleted', 'Undo', () => { S.tasks.push(copy); save(); this.render(); }); }
+        if (x === 'delete') { const copy = { ...t }; if (t.gcalId) { S.gdeletes.push(t.gcalId); GSync.soon(); } S.tasks = S.tasks.filter(o => o.id !== t.id); save(); this.closeSheet(); this.render(); this.toast('Deleted', 'Undo', () => { S.tasks.push(copy); save(); this.render(); }); }
       };
     });
     draw();
@@ -405,8 +405,9 @@ const UI = {
         <div class="grow center"><div class="plan-day">${esc(dayName)}</div><div class="faint">${d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</div></div>
         <button class="iconbtn" data-x="next" aria-label="Next day">›</button></div>
 
-      ${it.events.length || it.due.length || routines.length ? `<div class="card soft plan-fixed">
+      ${it.events.length || it.google.length || it.due.length || routines.length ? `<div class="card soft plan-fixed">
         ${it.events.map(e => `<div class="pf"><span class="pf-t">${e.time ? fmtHM(e.time) : 'All day'}</span>${esc(e.title)}</div>`).join('')}
+        ${it.google.map(g => `<div class="pf"><span class="pf-t" style="color:${g.color}">${g.time ? fmtHM(g.time) : 'All day'}</span>${esc(g.title)}${g.selfStatus === 'invited' && !g.isOrganizer ? ' · invite' : ''}</div>`).join('')}
         ${it.due.map(a => `<div class="pf"><span class="pf-t" style="color:${subj(a.subject).color}">${a.type === 'test' || a.type === 'quiz' ? atype(a.type).name : 'Due'}</span>${esc(a.title)}${a.status === 'done' ? ' ✓' : ''}</div>`).join('')}
         ${routines.length ? `<div class="pf faint"><span class="pf-t">Routines</span>${routines.map(r => esc(r.name)).join(' · ')}</div>` : ''}
       </div>` : ''}
@@ -610,6 +611,9 @@ const UI = {
         <details class="fold"><summary>What gets sent</summary><p class="sub" style="margin:0">Only the photos of a paper, his grade, and the TEKS list for that grade — and only when he taps “Build study pack.” No name or account. Instructions tell the AI never to answer the actual homework; it teaches the ideas and writes similar practice. Typical cost is a few cents per paper. The key is stored only on this phone.</p></details>
       </div>`; })()}
 
+      <h2>📆 Google Calendar sync</h2>
+      ${GSync.adminHTML()}
+
       <h2>⏰ Schedule</h2>
       <label class="lbl">Bedtime</label><input class="field" type="time" id="pz-bed" value="${st.bedtime}">
       <div class="list-btn" data-x="tschool">🏫 Quiet during school hours<span class="switch ${st.schoolQuiet ? 'on' : ''}" style="margin-left:auto"></span></div>
@@ -643,6 +647,7 @@ const UI = {
       };
       root.onclick = async e => {
         const b = e.target.closest('[data-x]'); if (!b) return; const x = b.dataset.x, id = b.dataset.id;
+        if (['gconnect', 'gon', 'gread', 'gwrite', 'gtog', 'ginv', 'gcadd', 'gcdel', 'gsync', 'grefresh', 'gtest', 'gdisconnect'].includes(x)) { const sc = $('#sheet').scrollTop; if (await GSync.adminClick(x, b, root) !== false) { await this.parentZone(); $('#sheet').scrollTop = sc; } return; }
         if (x === 'note') { const v = $('#pz-note', root).value.trim(); if (v) { S.notes.unshift({ id: uid(), text: v, from: 'Dad', at: Date.now(), read: false }); S.notes = S.notes.slice(0, 20); save({ noSchedule: true }); this.toast('Note sent 💌'); $('#pz-note', root).value = ''; } }
         if (x === 'given') { const r = S.redemptions.find(r => r.id === id); r.status = 'given'; r.givenAt = Date.now(); save({ noSchedule: true }); this.parentZone(); }
         if (x === 'wishok') { const w = S.wishes.find(w => w.id === id); const c = +(await ask(`Coin price for “${w.text}”?`, { input: true, value: '100', type: 'number', ok: 'Add reward' })); if (c > 0) { S.rewards.push({ id: uid(), emoji: '⭐', name: w.text, cost: c }); w.status = 'added'; S.rewardsUpdated = Date.now(); save({ noSchedule: true }); } this.parentZone(); }
@@ -749,6 +754,7 @@ const UI = {
       ${rest.length ? `<div class="list-head"><span>Up next</span>${q.length > rest.length + 1 ? `<span class="faint">+${q.length - rest.length - 1} more</span>` : ''}</div>${rest.map(t => `<div class="task" data-a="openTask" data-id="${t.id}"><span class="em">${esc(t.emoji)}</span><div class="grow"><div class="t">${esc(t.title)}</div>${t.time ? `<div class="meta">${fmtHM(t.time)}</div>` : ''}</div><button class="iconbtn" data-a="start" data-id="${t.id}" aria-label="Start">▶</button></div>`).join('')}` : ''}
       ${q.length || r || S.focus ? `<div class="quickadd" style="margin-top:10px"><input id="qa" placeholder="Add a mission — “math at 4pm”" enterkeyhint="done" autocomplete="off"><button class="iconbtn" data-a="qa" aria-label="Add">＋</button></div>` : ''}
       ${!S.player.tag ? `<div class="card" style="border-color:var(--accent)"><b>Set up your player card</b><div class="faint" style="margin:4px 0 10px">Gamertag, emblem, banner. Takes 20 seconds.</div><button class="btn small primary" data-a="customize">Customize</button></div>` : ''}
+      ${GSync.invitesCard()}
       ${School.dueSoonHTML()}
       ${note ? `<div class="card" style="border-color:var(--gold)"><div class="faint">Message from ${esc(note.from || 'Dad')}</div><div style="font-size:18px;font-weight:600;margin:6px 0 10px">${esc(note.text)}</div><button class="btn small gold" data-a="readNote" data-id="${note.id}">Got it</button></div>` : ''}
       ${this.challengesCard()}
@@ -897,6 +903,8 @@ const UI = {
       case 'calToday': { const d = new Date(); Cal.month = new Date(d.getFullYear(), d.getMonth(), 1); Cal.sel = today(); return this.render(); }
       case 'calAdd': return Cal.add(el.dataset.k, Cal.sel);
       case 'editEvent': return Cal.eventSheet(S.events.find(x => x.id === id));
+      case 'gevent': { const g = (S.gevents || []).find(x => x.key === el.dataset.k); return g && GSync.detail(g); }
+      case 'rsvp': { const g = (S.gevents || []).find(x => x.key === el.dataset.k); if (g) { await GSync.rsvp(g, el.dataset.s); this.render(); } return; }
     }
   },
 };

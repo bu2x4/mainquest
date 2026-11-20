@@ -24,6 +24,7 @@ const Cal = {
       it.due.forEach(a => dots.push(`<i class="${['test', 'quiz', 'project'].includes(a.type) ? 'sq' : ''}" style="background:${subj(a.subject).color}"></i>`));
       it.tasks.filter(t => !t.done).forEach(t => dots.push(`<i class="sm" style="background:${t.kind === 'study' ? 'var(--accent)' : 'var(--muted)'}"></i>`));
       it.events.forEach(e => dots.push(`<i style="background:${(EVENT_CATS.find(c => c.id === e.cat) || EVENT_CATS[0]).color}"></i>`));
+      it.google.forEach(g => dots.push(`<i class="${g.selfStatus === 'invited' ? 'ring' : ''}" style="background:${g.color}"></i>`));
       const cls = ['cal-cell', d.getMonth() !== mo ? 'out' : '', dk === dk0 ? 'today' : '', dk === this.sel ? 'sel' : '', S.stats.days[dk] ? 'good' : ''].join(' ');
       return `<button class="${cls}" data-a="calDay" data-k="${dk}"><span class="n">${d.getDate()}</span><span class="dots">${dots.slice(0, 4).join('')}${dots.length > 4 ? '<b>+</b>' : ''}</span></button>`;
     };
@@ -43,6 +44,8 @@ const Cal = {
     const rows = [];
     it.events.forEach(e => rows.push(`<button class="arow" data-a="editEvent" data-id="${e.id}" style="--sc:${(EVENT_CATS.find(c => c.id === e.cat) || EVENT_CATS[0]).color}">
       <span class="arow-ic">${esc(e.emoji || '📅')}</span><span class="grow"><span class="arow-t">${esc(e.title)}</span><span class="arow-m">${e.time ? fmtHM(e.time) : 'All day'}${e.where ? ' · ' + esc(e.where) : ''}</span></span></button>`));
+    it.google.forEach(g => rows.push(`<button class="arow" data-a="gevent" data-k="${esc(g.key)}" style="--sc:${g.color}">
+      <span class="arow-ic">📅</span><span class="grow"><span class="arow-t">${esc(g.title)}${g.selfStatus === 'invited' && !g.isOrganizer ? ' <span class="pill gold">Invite</span>' : ''}</span><span class="arow-m">${g.time ? fmtHM(g.time) + '–' + fmtHM(g.endTime) : 'All day'}${g.location ? ' · ' + esc(g.location) : ''} · ${esc(g.calName || 'Google')}</span></span></button>`));
     it.due.forEach(a => rows.push(`<button class="arow ${a.status === 'done' ? 'done' : ''}" data-a="openAssignment" data-id="${a.id}" style="--sc:${subj(a.subject).color}">
       <span class="arow-ic">${atype(a.type).icon}</span><span class="grow"><span class="arow-t">${a.type === 'test' || a.type === 'quiz' ? atype(a.type).name + ': ' : 'Due: '}${esc(a.title)}</span><span class="arow-m">${esc(subj(a.subject).name)}${a.status === 'done' ? ' · cleared' : ''}</span>
       ${a.maxHp && !a.defeated ? `<span class="hp"><i style="width:${(a.hp / a.maxHp * 100).toFixed(0)}%"></i></span>` : ''}</span></button>`));
@@ -68,26 +71,35 @@ const Cal = {
 
   eventSheet(e, dk) {
     const isNew = !e;
-    const f = e ? { ...e } : { title: '', cat: 'personal', date: dk || today(), time: '', where: '', emoji: '' };
+    const f = e ? { ...e, attendees: [...(e.attendees || [])] } : { title: '', cat: 'personal', date: dk || today(), time: '', endTime: '', where: '', emoji: '', attendees: [] };
+    const g = S.settings.gcal; const canInv = typeof GSync !== 'undefined' && GSync.canInvite();
     const draw = () => UI.sheet(`<div class="grab"></div><h3>${isNew ? 'New event' : 'Edit event'}</h3>
       <input class="field" id="ev-title" value="${esc(f.title)}" placeholder="e.g. Soccer practice, dentist, field trip" autocomplete="off">
       <label class="lbl">Type</label><div class="chips">${EVENT_CATS.map(c => `<button class="chip ${f.cat === c.id ? 'on' : ''}" data-x="cat" data-k="${c.id}"><i class="swatch" style="background:${c.color}"></i>${c.name}</button>`).join('')}</div>
-      <div class="grid2" style="margin-top:12px"><div><div class="faint">Date</div><input class="field" type="date" id="ev-date" value="${f.date}"></div><div><div class="faint">Time (optional)</div><input class="field" type="time" id="ev-time" value="${f.time || ''}"></div></div>
+      <div class="grid2" style="margin-top:12px"><div><div class="faint">Date</div><input class="field" type="date" id="ev-date" value="${f.date}"></div><div><div class="faint">Start (optional)</div><input class="field" type="time" id="ev-time" value="${f.time || ''}"></div></div>
+      <div class="grid2" style="margin-top:8px"><div></div><div><div class="faint">End (optional)</div><input class="field" type="time" id="ev-end" value="${f.endTime || ''}"></div></div>
       <label class="lbl">Where (optional)</label><input class="field" id="ev-where" value="${esc(f.where || '')}">
-      <p class="faint">You’ll get a heads-up 30 minutes before (if it has a time).</p>
+      ${canInv ? `<label class="lbl">Invite people <span class="faint">(sends a Google Calendar invite)</span></label>
+        <div class="chips">${(g.invites === 'approved' ? g.contacts : g.contacts.concat(f.attendees.filter(a => !g.contacts.some(c => c.email === a)).map(a => ({ name: a, email: a })))).map(c => `<button class="chip ${f.attendees.includes(c.email) ? 'on' : ''}" data-x="guest" data-k="${esc(c.email)}">${f.attendees.includes(c.email) ? '✓ ' : ''}${esc(c.name)}</button>`).join('') || (g.invites === 'approved' ? '<span class="faint">No approved contacts yet — a grown-up can add them.</span>' : '')}</div>
+        ${g.invites === 'anyone' ? `<div class="row" style="margin-top:8px"><input class="field grow" id="ev-guest" type="email" placeholder="friend@example.com"><button class="btn small" data-x="addguest">Add</button></div>` : ''}
+        ${(e && e.guestStatus || []).length ? `<div class="faint" style="margin-top:6px">${e.guestStatus.map(x => esc(x.email.split('@')[0]) + ': ' + ({ accepted: 'going', declined: 'not going', tentative: 'maybe', invited: 'no answer yet' }[x.status] || x.status)).join(' · ')}</div>` : ''}` : ''}
+      <p class="faint">You’ll get a heads-up 30 minutes before (if it has a time).${g.on && g.writeId && g.pushEvents ? ' Syncs to Google Calendar.' : ''}</p>
       <button class="btn primary big block" data-x="save">${isNew ? 'Add event' : 'Save'}</button>
       ${!isNew ? `<div class="btn-row"><button class="btn ghost" data-x="delete">Delete</button></div>` : ''}`, root => {
-      const pull = () => { f.title = $('#ev-title', root).value.trim(); f.date = $('#ev-date', root).value || f.date; f.time = $('#ev-time', root).value; f.where = $('#ev-where', root).value.trim(); };
+      const pull = () => { f.title = $('#ev-title', root).value.trim(); f.date = $('#ev-date', root).value || f.date; f.time = $('#ev-time', root).value; f.endTime = f.time ? $('#ev-end', root).value : ''; f.where = $('#ev-where', root).value.trim(); };
       root.onclick = async ev => {
         const b = ev.target.closest('[data-x]'); if (!b) return; pull();
         if (b.dataset.x === 'cat') { f.cat = b.dataset.k; return draw(); }
+        if (b.dataset.x === 'guest') { const k = b.dataset.k; f.attendees = f.attendees.includes(k) ? f.attendees.filter(x => x !== k) : [...f.attendees, k]; return draw(); }
+        if (b.dataset.x === 'addguest') { const v = ($('#ev-guest', root).value || '').trim(); if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)) return UI.toast('Enter a valid email'); if (!f.attendees.includes(v)) f.attendees.push(v); return draw(); }
         if (b.dataset.x === 'save') {
           if (!f.title) return UI.toast('Give it a name');
           f.emoji = autoEmoji(f.title) === '⭐' ? '📅' : autoEmoji(f.title);
-          if (isNew) S.events.push({ id: uid(), ...f }); else Object.assign(S.events.find(x => x.id === e.id), f);
-          this.sel = f.date; save(); UI.closeSheet(); UI.render(); UI.toast(isNew ? 'Event added' : 'Saved');
+          const invited = f.attendees.length && (!e || f.attendees.some(a => !(e.attendees || []).includes(a)));
+          if (isNew) S.events.push({ id: uid(), ...f, gdirty: true }); else Object.assign(S.events.find(x => x.id === e.id), f, { gdirty: true });
+          this.sel = f.date; save(); if (typeof GSync !== 'undefined') GSync.soon(); UI.closeSheet(); UI.render(); UI.toast(invited && GSync.canInvite() ? 'Saved — invites go out when Google syncs' : isNew ? 'Event added' : 'Saved');
         }
-        if (b.dataset.x === 'delete' && await ask('Delete this event?', { ok: 'Delete' })) { S.events = S.events.filter(x => x.id !== e.id); save(); UI.closeSheet(); UI.render(); }
+        if (b.dataset.x === 'delete' && await ask(e.attendees && e.attendees.length ? 'Delete this event? Guests will get a cancellation from Google.' : 'Delete this event?', { ok: 'Delete' })) { if (e.gcalId) { S.gdeletes.push(e.gcalId); GSync.soon(); } S.events = S.events.filter(x => x.id !== e.id); save(); UI.closeSheet(); UI.render(); }
       };
     });
     draw();

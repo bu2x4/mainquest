@@ -106,10 +106,10 @@ const School = {
         if (b.dataset.x === 'due') { f.due = dayKey(addDays(new Date(), +k)); return draw(); }
         if (b.dataset.x === 'save') {
           if (!f.title) { UI.toast('Give it a name'); return; }
-          if (isNew) { const na = createAssignment(f); UI.closeSheet(); UI.render(); UI.toast(na.maxHp ? `Boss spawned: ${na.boss}. ${S.tasks.filter(t => t.assignmentId === na.id).length} study hits scheduled.` : `Added. Reminder set for ${dueLabel(na.due) === 'Tomorrow' ? 'today after school' : 'the day before'}.`); Sfx.play('coin'); }
-          else { const orig = S.assignments.find(x => x.id === a.id); const replan = orig.due !== f.due || orig.type !== f.type; Object.assign(orig, { title: f.title, subject: f.subject, type: f.type, due: f.due, notes: f.notes }); if (replan) planAssignment(orig); save(); UI.closeSheet(); UI.render(); UI.toast(replan ? 'Saved and re-planned' : 'Saved'); }
+          if (isNew) { const na = createAssignment(f); GSync.soon(); UI.closeSheet(); UI.render(); UI.toast(na.maxHp ? `Boss spawned: ${na.boss}. ${S.tasks.filter(t => t.assignmentId === na.id).length} study hits scheduled.` : `Added. Reminder set for ${dueLabel(na.due) === 'Tomorrow' ? 'today after school' : 'the day before'}.`); Sfx.play('coin'); }
+          else { const orig = S.assignments.find(x => x.id === a.id); const replan = orig.due !== f.due || orig.type !== f.type; Object.assign(orig, { title: f.title, subject: f.subject, type: f.type, due: f.due, notes: f.notes, gdirty: true }); if (replan) planAssignment(orig); save(); GSync.soon(); UI.closeSheet(); UI.render(); UI.toast(replan ? 'Saved and re-planned' : 'Saved'); }
         }
-        if (b.dataset.x === 'delete') { if (await ask(`Delete “${a.title}” and its planned study sessions?`, { ok: 'Delete' })) { S.assignments = S.assignments.filter(x => x.id !== a.id); S.tasks = S.tasks.filter(t => !(t.assignmentId === a.id && !t.done)); save(); UI.closeSheet(); UI.render(); } }
+        if (b.dataset.x === 'delete') { if (await ask(`Delete “${a.title}” and its planned study sessions?`, { ok: 'Delete' })) { if (a.gcalId) S.gdeletes.push(a.gcalId); S.tasks.filter(t => t.assignmentId === a.id && !t.done && t.gcalId).forEach(t => S.gdeletes.push(t.gcalId)); S.assignments = S.assignments.filter(x => x.id !== a.id); S.tasks = S.tasks.filter(t => !(t.assignmentId === a.id && !t.done)); save(); GSync.soon(); UI.closeSheet(); UI.render(); } }
       };
     });
     draw();
